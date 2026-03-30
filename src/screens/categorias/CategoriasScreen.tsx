@@ -1,0 +1,225 @@
+import { useState, useMemo } from 'react';
+import {
+  View, Text, TouchableOpacity,
+  ScrollView, StyleSheet, Alert,
+} from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useAppStore } from '../../store/useAppStore';
+import { AppStackParamList } from '../../types/navigation';
+import { Categoria } from '../../types';
+import { Colors } from '../../constants/Colors';
+import { Fonts } from '../../constants/Fonts';
+
+type Nav = StackNavigationProp<AppStackParamList>;
+
+// ── Árbol de categorías ───────────────────────────────────────────────────
+
+function buildTree(cats: Categoria[]): Categoria[] {
+  const roots = cats.filter(c => c.parent_id === null);
+  const addChildren = (c: Categoria): Categoria => ({
+    ...c,
+    subcategorias: cats.filter(s => s.parent_id === c.id).map(addChildren),
+  });
+  return roots.map(addChildren);
+}
+
+// ── Nodo de acordeón ──────────────────────────────────────────────────────
+
+function NodoCat({
+  cat,
+  nivel,
+  nav,
+}: {
+  cat: Categoria;
+  nivel: number;
+  nav: Nav;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const tieneHijos = (cat.subcategorias?.length ?? 0) > 0;
+
+  return (
+    <View>
+      <View style={[st.nodo, { paddingLeft: 14 + nivel * 18 }]}>
+        <Text style={st.nodoIcono}>{cat.icono}</Text>
+        <TouchableOpacity
+          style={st.nodoNombreRow}
+          onPress={() => tieneHijos && setExpanded(e => !e)}
+          activeOpacity={tieneHijos ? 0.7 : 1}
+        >
+          <Text style={st.nodoNombre} numberOfLines={1}>{cat.nombre}</Text>
+          {tieneHijos && (
+            <Ionicons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={Colors.gris}
+            />
+          )}
+        </TouchableOpacity>
+
+        {/* Editar */}
+        <TouchableOpacity
+          style={st.editBtn}
+          onPress={() => nav.navigate('CategoriaForm', { categoriaId: cat.id })}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="pencil-outline" size={16} color={Colors.celeste} />
+        </TouchableOpacity>
+      </View>
+
+      {tieneHijos && expanded && (
+        <View style={[st.children, { borderLeftColor: cat.color + '55' }]}>
+          {cat.subcategorias!.map(sub => (
+            <NodoCat key={sub.id} cat={sub} nivel={nivel + 1} nav={nav} />
+          ))}
+          {/* Agregar subcategoría del nivel siguiente si nivel < 3 */}
+          {nivel < 2 && (
+            <TouchableOpacity
+              style={[st.addSubBtn, { paddingLeft: 14 + (nivel + 1) * 18 }]}
+              onPress={() =>
+                nav.navigate('CategoriaForm', {
+                  parentId: cat.id,
+                  tipo: cat.tipo,
+                })
+              }
+              activeOpacity={0.75}
+            >
+              <Ionicons name="add-circle-outline" size={16} color={Colors.gris} />
+              <Text style={st.addSubText}>Agregar subcategoría</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── Pantalla principal ────────────────────────────────────────────────────
+
+export function CategoriasScreen() {
+  const nav = useNavigation<Nav>();
+  const { categorias, refreshCategorias } = useAppStore();
+  const [tabActivo, setTabActivo] = useState<'egreso' | 'ingreso'>('egreso');
+
+  useFocusEffect(useCallback(() => { refreshCategorias(); }, []));
+
+  const arbol = useMemo(
+    () => buildTree(categorias.filter(c => c.tipo === tabActivo)),
+    [categorias, tabActivo]
+  );
+
+  return (
+    <View style={st.safe}>
+      {/* ── Tabs ──────────────────────────────────── */}
+      <View style={st.tabBar}>
+        {(['egreso', 'ingreso'] as const).map(t => (
+          <TouchableOpacity
+            key={t}
+            style={[st.tab, tabActivo === t && st.tabActive]}
+            onPress={() => setTabActivo(t)}
+            activeOpacity={0.75}
+          >
+            <Text style={[st.tabText, tabActivo === t && st.tabTextActive]}>
+              {t === 'egreso' ? '↓ Egresos' : '↑ Ingresos'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* ── Lista de categorías ───────────────────── */}
+      <ScrollView
+        contentContainerStyle={st.list}
+        showsVerticalScrollIndicator={false}
+      >
+        {arbol.length === 0 ? (
+          <View style={st.emptyCenter}>
+            <Text style={st.emptyEmoji}>🗂️</Text>
+            <Text style={st.emptyText}>No hay categorías de {tabActivo}</Text>
+          </View>
+        ) : (
+          arbol.map(cat => (
+            <View key={cat.id} style={st.rootCard}>
+              <NodoCat cat={cat} nivel={0} nav={nav} />
+            </View>
+          ))
+        )}
+
+        {/* Botón nueva categoría raíz */}
+        <TouchableOpacity
+          style={st.newCatBtn}
+          onPress={() => nav.navigate('CategoriaForm', { tipo: tabActivo })}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="add-circle" size={20} color={Colors.celeste} />
+          <Text style={st.newCatText}>Nueva categoría de {tabActivo}</Text>
+        </TouchableOpacity>
+
+        <View style={{ height: 32 }} />
+      </ScrollView>
+    </View>
+  );
+}
+
+// ── Estilos ───────────────────────────────────────────────────────────────
+
+const st = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: Colors.fondo },
+
+  // Tabs
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: Colors.blanco,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.borde,
+  },
+  tab: {
+    flex: 1, alignItems: 'center', paddingVertical: 14,
+    borderBottomWidth: 2.5, borderBottomColor: 'transparent',
+  },
+  tabActive:     { borderBottomColor: Colors.celeste },
+  tabText:       { fontFamily: Fonts.semiBold, fontSize: 14, color: Colors.gris },
+  tabTextActive: { color: Colors.celeste },
+
+  // Lista
+  list: { padding: 16, gap: 12 },
+
+  // Tarjeta raíz
+  rootCard: {
+    backgroundColor: Colors.blanco, borderRadius: 14, overflow: 'hidden',
+  },
+
+  // Nodo
+  nodo: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 13, paddingRight: 14, gap: 10,
+  },
+  nodoIcono:    { fontSize: 18, width: 24, textAlign: 'center' },
+  nodoNombreRow:{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  nodoNombre:   { flex: 1, fontFamily: Fonts.medium, fontSize: 14, color: Colors.texto },
+  editBtn:      { padding: 4 },
+  children:     { borderLeftWidth: 2, marginLeft: 32 },
+
+  // Agregar subcategoría
+  addSubBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingVertical: 10, paddingRight: 14,
+  },
+  addSubText: { fontFamily: Fonts.regular, fontSize: 13, color: Colors.gris },
+
+  // Nueva categoría
+  newCatBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, paddingVertical: 14, borderRadius: 14,
+    borderWidth: 1.5, borderColor: Colors.celeste, borderStyle: 'dashed',
+    backgroundColor: Colors.celesteLight,
+  },
+  newCatText: { fontFamily: Fonts.semiBold, fontSize: 14, color: Colors.celeste },
+
+  // Empty
+  emptyCenter: { alignItems: 'center', paddingVertical: 40, gap: 8 },
+  emptyEmoji:  { fontSize: 48 },
+  emptyText:   { fontFamily: Fonts.regular, fontSize: 14, color: Colors.gris },
+});
