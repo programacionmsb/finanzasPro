@@ -13,13 +13,6 @@ type Modo = 'compartir' | 'foto' | 'manual';
 
 const OPCIONES: { modo: Modo; icono: keyof typeof Ionicons.glyphMap; label: string; desc: string; color: string }[] = [
   {
-    modo:  'compartir',
-    icono: 'share-social-outline',
-    label: 'Compartir desde app',
-    desc:  'Recibir texto desde Yape, Plin o apps bancarias',
-    color: Colors.morado,
-  },
-  {
     modo:  'foto',
     icono: 'camera-outline',
     label: 'Desde foto / galería',

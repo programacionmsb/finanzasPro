@@ -178,9 +178,10 @@ export function DashboardScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.iconBtn}
-              accessibilityLabel="Notificaciones"
+              onPress={() => navigation.navigate('Ajustes')}
+              accessibilityLabel="Ajustes"
             >
-              <Ionicons name="notifications-outline" size={22} color={Colors.blanco} />
+              <Ionicons name="settings-outline" size={22} color={Colors.blanco} />
             </TouchableOpacity>
           </View>
         </View>

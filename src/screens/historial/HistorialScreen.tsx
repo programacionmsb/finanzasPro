@@ -93,6 +93,9 @@ function MovimientoItem({
           <Text style={st.itemCuenta} numberOfLines={1}>
             {mov.cuenta_nombre ?? '—'}
           </Text>
+          {mov.numero_operacion && mov.numero_operacion !== '0' ? (
+            <Text style={st.itemNroOp} numberOfLines={1}>Op. {mov.numero_operacion}</Text>
+          ) : null}
         </View>
 
         {/* Monto */}
@@ -548,6 +551,7 @@ const st = StyleSheet.create({
   itemTitulo:   { fontFamily: Fonts.semiBold, fontSize: 14, color: Colors.texto },
   itemCat:      { fontFamily: Fonts.regular, fontSize: 12, color: Colors.gris, marginTop: 1 },
   itemCuenta:   { fontFamily: Fonts.regular, fontSize: 11, color: Colors.borde, marginTop: 1 },
+  itemNroOp:    { fontFamily: Fonts.regular, fontSize: 11, color: Colors.gris, marginTop: 1 },
   itemMontoCol: { alignItems: 'flex-end' },
   itemMonto:    { fontFamily: Fonts.bold, fontSize: 15 },
   montoIngreso:  { color: Colors.verde },

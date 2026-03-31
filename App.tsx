@@ -62,7 +62,7 @@ export default function App() {
 
     checkSharedImage();
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') checkSharedImage();
+      if (state === 'active') setTimeout(checkSharedImage, 300);
     });
     return () => sub.remove();
   }, []);

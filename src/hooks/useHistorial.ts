@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppStore } from '../store/useAppStore';
 import { getMovimientos, deleteMovimiento, updateMovimiento } from '../services/db';
+import { eliminarMovimientoCloud } from '../services/firestore';
 import { fechaAmigable } from '../utils/formatters';
 import { Movimiento } from '../types';
 
@@ -97,6 +98,7 @@ export function useHistorial() {
           onPress: async () => {
             await deleteMovimiento(id);
             setMovimientos(prev => prev.filter(m => m.id !== id));
+            if (usuario) eliminarMovimientoCloud(usuario.id, id).catch(() => {});
             await refreshCuentas();
           },
         },

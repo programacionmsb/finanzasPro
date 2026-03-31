@@ -1,17 +1,20 @@
 import { useState } from 'react';
 import {
   View, Text, Image, TouchableOpacity,
-  ScrollView, StyleSheet, Switch, Alert, Modal,
+  ScrollView, StyleSheet, Switch, Alert, Modal, ActivityIndicator,
 } from 'react-native';
 import { StackScreenProps } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useAppStore } from '../../store/useAppStore';
-import { updateUsuarioMoneda, updateUsuarioOcultarMontos } from '../../services/db';
+import { updateUsuarioMoneda, updateUsuarioOcultarMontos, getDb } from '../../services/db';
+import { eliminarTodosLosDatosCloud } from '../../services/firestore';
 import { AppStackParamList } from '../../types/navigation';
 import { Colors } from '../../constants/Colors';
 import { Fonts } from '../../constants/Fonts';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import auth from '@react-native-firebase/auth';
 
 type Nav = StackNavigationProp<AppStackParamList>;
 
@@ -101,9 +104,10 @@ function MonedaModal({
 
 export function AjustesScreen() {
   const nav = useNavigation<Nav>();
-  const { usuario, setUsuario, amountsHidden, toggleAmountsHidden } = useAppStore();
+  const { usuario, setUsuario, amountsHidden, toggleAmountsHidden, setLoggedOut } = useAppStore();
 
   const [showMoneda, setShowMoneda] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [moneda, setMonedaLocal] = useState<'PEN' | 'USD' | 'EUR'>(
     (usuario?.moneda as 'PEN' | 'USD' | 'EUR') ?? 'PEN'
   );
@@ -132,7 +136,49 @@ export function AjustesScreen() {
         {
           text: 'Cerrar sesión',
           style: 'destructive',
-          onPress: () => setUsuario(null),
+          onPress: async () => {
+            try { await auth().signOut(); } catch {}
+            try { await GoogleSignin.signOut(); } catch {}
+            try {
+              const db = await getDb();
+              await db.runAsync('DELETE FROM usuarios');
+            } catch {}
+            setLoggedOut(true);
+            setUsuario(null);
+          },
+        },
+      ]
+    );
+  }
+
+  function handleRestablecer() {
+    Alert.alert(
+      'Restablecer app',
+      '¿Estás seguro? Se eliminarán TODOS tus datos locales y de la nube. Esta acción no se puede deshacer.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar todo',
+          style: 'destructive',
+          onPress: async () => {
+            if (!usuario) return;
+            setResetting(true);
+            try {
+              const db = await getDb();
+              await db.runAsync('DELETE FROM movimientos WHERE usuario_id = ?', [usuario.id]);
+              await db.runAsync('DELETE FROM cuentas WHERE usuario_id = ?', [usuario.id]);
+              await db.runAsync('DELETE FROM categorias WHERE usuario_id = ?', [usuario.id]);
+              await db.runAsync('DELETE FROM usuarios WHERE id = ?', [usuario.id]);
+              await eliminarTodosLosDatosCloud(usuario.id).catch(() => {});
+              await auth().signOut().catch(() => {});
+              await GoogleSignin.signOut().catch(() => {});
+              setUsuario(null);
+            } catch (e) {
+              Alert.alert('Error', 'No se pudo restablecer completamente. Intenta de nuevo.');
+            } finally {
+              setResetting(false);
+            }
+          },
         },
       ]
     );
@@ -230,6 +276,23 @@ export function AjustesScreen() {
         <Text style={st.logoutText}>Cerrar sesión</Text>
       </TouchableOpacity>
 
+      {/* ── Restablecer ──────────────────────────── */}
+      <TouchableOpacity
+        style={st.resetBtn}
+        onPress={handleRestablecer}
+        activeOpacity={0.85}
+        disabled={resetting}
+      >
+        {resetting ? (
+          <ActivityIndicator color={Colors.gris} size="small" />
+        ) : (
+          <>
+            <Ionicons name="trash-outline" size={20} color={Colors.gris} />
+            <Text style={st.resetText}>Restablecer app</Text>
+          </>
+        )}
+      </TouchableOpacity>
+
       <View style={{ height: 32 }} />
 
       {/* ── Modal moneda ────────────────────────── */}
@@ -288,6 +351,15 @@ const st = StyleSheet.create({
     backgroundColor: Colors.rojoLight,
   },
   logoutText: { fontFamily: Fonts.semiBold, fontSize: 15, color: Colors.rojo },
+
+  // Restablecer
+  resetBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 10, paddingVertical: 16, borderRadius: 14,
+    borderWidth: 1.5, borderColor: Colors.borde,
+    backgroundColor: Colors.blanco,
+  },
+  resetText: { fontFamily: Fonts.semiBold, fontSize: 15, color: Colors.gris },
 
   // Modal moneda
   modalOverlay: {

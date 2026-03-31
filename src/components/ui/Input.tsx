@@ -43,8 +43,8 @@ export function Input({
         <TextInput
           style={styles.input}
           placeholderTextColor={Colors.gris}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onFocus={() => { console.log('[Input] onFocus', props.placeholder); setFocused(true); }}
+          onBlur={() => { console.log('[Input] onBlur', props.placeholder); setFocused(false); }}
           {...props}
         />
         {rightIcon && (

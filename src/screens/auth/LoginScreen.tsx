@@ -8,6 +8,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthStackParamList } from '../../types/navigation';
 import { signInWithGoogle, buildDemoUser, statusCodes } from '../../services/auth';
+import { upsertUsuario } from '../../services/db';
+import { sincronizarDesdeFirestore } from '../../services/firestore';
+import { useAppStore } from '../../store/useAppStore';
+import firestore from '@react-native-firebase/firestore';
 import { Colors } from '../../constants/Colors';
 import { Fonts } from '../../constants/Fonts';
 
@@ -23,18 +27,56 @@ export function LoginScreen({ navigation }: Props) {
   const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [loadingDemo,   setLoadingDemo]   = useState(false);
   const [error,         setError]         = useState<string | null>(null);
+  const { setUsuario, setAmountsHidden } = useAppStore();
 
   async function handleGooglePress() {
     setError(null);
     setLoadingGoogle(true);
     try {
-      const usuario = await signInWithGoogle();
-      navigation.navigate('Onboarding', { usuario });
+      console.log('[LOGIN] Iniciando Google Sign-In...');
+      const pendingUser = await signInWithGoogle();
+      console.log('[LOGIN] Google Sign-In OK, uid:', pendingUser.id);
+
+      // Verificar si el usuario ya tiene datos en Firestore
+      console.log('[LOGIN] Consultando Firestore...');
+      const userDoc = await firestore().collection('users').doc(pendingUser.id).get();
+      console.log('[LOGIN] userDoc.exists:', userDoc.exists());
+
+      if (userDoc.exists()) {
+        // Usuario existente — restaurar datos desde la nube
+        const cloudData = userDoc.data()!;
+        console.log('[LOGIN] Usuario existente, sincronizando desde Firestore...');
+        await upsertUsuario({
+          id:             pendingUser.id,
+          nombre:         pendingUser.nombre,
+          email:          pendingUser.email,
+          foto_url:       pendingUser.foto_url,
+          moneda:         cloudData.moneda ?? 'PEN',
+          ocultar_montos: cloudData.ocultar_montos ?? 0,
+        });
+        await sincronizarDesdeFirestore(pendingUser.id);
+        console.log('[LOGIN] Sincronización completa');
+        setAmountsHidden(cloudData.ocultar_montos === 1);
+        setUsuario({
+          id:             pendingUser.id,
+          nombre:         pendingUser.nombre,
+          email:          pendingUser.email,
+          foto_url:       pendingUser.foto_url,
+          moneda:         cloudData.moneda ?? 'PEN',
+          ocultar_montos: cloudData.ocultar_montos ?? 0,
+          creado_en:      cloudData.creado_en ?? new Date().toISOString(),
+        });
+      } else {
+        // Usuario nuevo — ir al onboarding
+        console.log('[LOGIN] Usuario nuevo, navegando a Onboarding');
+        navigation.navigate('Onboarding', { usuario: pendingUser });
+      }
     } catch (e: any) {
+      console.error('[LOGIN] ERROR:', e?.code, e?.message, JSON.stringify(e));
       if (e.code === statusCodes.SIGN_IN_CANCELLED) {
-        // usuario canceló
+        console.log('[LOGIN] Usuario canceló');
       } else if (e.code === statusCodes.IN_PROGRESS) {
-        // ya en progreso
+        console.log('[LOGIN] Ya en progreso');
       } else {
         setError('Error al conectar con Google. Intenta de nuevo.');
       }

@@ -29,6 +29,7 @@ export function BottomSheet({
   maxHeight = SCREEN_HEIGHT * 0.6,
   style,
 }: BottomSheetProps) {
+  console.log('[BottomSheet] render, visible:', visible);
   const translateY = useRef(new Animated.Value(maxHeight)).current;
   const opacity    = useRef(new Animated.Value(0)).current;
 
@@ -69,10 +70,12 @@ export function BottomSheet({
       transparent
       animationType="none"
       onRequestClose={onClose}
-      statusBarTranslucent
     >
       {/* Overlay */}
-      <TouchableWithoutFeedback onPress={onClose} accessibilityLabel="Cerrar panel">
+      <TouchableWithoutFeedback
+        onPress={() => { console.log('[BottomSheet] overlay presionado → onClose'); onClose(); }}
+        accessibilityLabel="Cerrar panel"
+      >
         <Animated.View style={[styles.overlay, { opacity }]} />
       </TouchableWithoutFeedback>
 

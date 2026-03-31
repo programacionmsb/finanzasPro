@@ -11,7 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useCuentas } from '../../hooks/useCuentas';
 import { useAppStore } from '../../store/useAppStore';
-import { insertCuenta } from '../../services/db';
+import { insertCuenta, contarMovimientosCuenta, eliminarCuentaDefinitivo } from '../../services/db';
 import { MontoText } from '../../components/ui/MontoText';
 import { SectionTitle } from '../../components/ui/SectionTitle';
 import { BottomSheet } from '../../components/ui/BottomSheet';
@@ -51,6 +51,7 @@ function CuentaCard({
   numMovimientos,
   verificada,
   onVerificar,
+  onEliminar,
 }: {
   cuenta: Cuenta;
   moneda: string;
@@ -59,6 +60,7 @@ function CuentaCard({
   numMovimientos: number;
   verificada: boolean;
   onVerificar: () => void;
+  onEliminar: () => void;
 }) {
   return (
     <View style={[styles.cuentaCard, { borderLeftColor: cuenta.color, borderLeftWidth: 4 }]}>
@@ -103,11 +105,18 @@ function CuentaCard({
         </View>
       </View>
 
-      {/* Botón verificar */}
-      <TouchableOpacity style={styles.verificarBtn} onPress={onVerificar} activeOpacity={0.75}>
-        <Ionicons name="search-outline" size={16} color={Colors.celeste} />
-        <Text style={styles.verificarBtnText}>Verificar saldo</Text>
-      </TouchableOpacity>
+      {/* Botones inferiores */}
+      <View style={styles.cuentaActions}>
+        <TouchableOpacity style={styles.verificarBtn} onPress={onVerificar} activeOpacity={0.75}>
+          <Ionicons name="search-outline" size={16} color={Colors.celeste} />
+          <Text style={styles.verificarBtnText}>Verificar</Text>
+        </TouchableOpacity>
+        <View style={styles.actionDivider} />
+        <TouchableOpacity style={styles.eliminarBtn} onPress={onEliminar} activeOpacity={0.75}>
+          <Ionicons name="trash-outline" size={16} color={Colors.rojo} />
+          <Text style={styles.eliminarBtnText}>Eliminar</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -257,13 +266,34 @@ export function CuentasScreen() {
   const navigation = useNavigation<CuentasNav>();
   const { usuario, cuentas, estadisticas, estaVerificada, saldoTotal, loading } = useCuentas();
   const { refreshCuentas } = useAppStore();
-  const [sheetVisible, setSheetVisible] = useState(false);
 
   const moneda = usuario?.moneda ?? 'PEN';
   const cuentasVerificadas = cuentas.filter(c => estaVerificada(c.id)).length;
 
   function irAConciliacion(cuentaId: number) {
     navigation.navigate('Conciliacion', { cuentaId });
+  }
+
+  async function handleEliminarCuenta(cuentaId: number, nombre: string) {
+    const total = await contarMovimientosCuenta(cuentaId);
+    if (total > 0) {
+      Alert.alert(
+        'No se puede eliminar',
+        `"${nombre}" tiene ${total} movimiento(s) asociado(s). Elimina esos movimientos primero.`
+      );
+      return;
+    }
+    Alert.alert('Eliminar cuenta', `¿Eliminar "${nombre}"? Esta acción no se puede deshacer.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: async () => {
+          await eliminarCuentaDefinitivo(cuentaId);
+          await refreshCuentas();
+        },
+      },
+    ]);
   }
 
   return (
@@ -315,6 +345,7 @@ export function CuentasScreen() {
                   numMovimientos={stats?.num_movimientos ?? 0}
                   verificada={estaVerificada(cuenta.id)}
                   onVerificar={() => irAConciliacion(cuenta.id)}
+                  onEliminar={() => handleEliminarCuenta(cuenta.id, cuenta.nombre)}
                 />
               );
             })}
@@ -322,7 +353,7 @@ export function CuentasScreen() {
             {/* Botón agregar cuenta */}
             <TouchableOpacity
               style={styles.agregarBtn}
-              onPress={() => setSheetVisible(true)}
+              onPress={() => navigation.navigate('CuentaForm')}
               activeOpacity={0.7}
             >
               <Ionicons name="add-circle-outline" size={22} color={Colors.celeste} />
@@ -334,12 +365,6 @@ export function CuentasScreen() {
         )}
       </ScrollView>
 
-      {/* BottomSheet para agregar cuenta */}
-      <AgregaCuentaSheet
-        visible={sheetVisible}
-        onClose={() => setSheetVisible(false)}
-        onGuardado={() => refreshCuentas()}
-      />
     </View>
   );
 }
@@ -451,14 +476,19 @@ const styles = StyleSheet.create({
     color: Colors.texto,
   },
 
-  // Verificar
+  // Acciones inferiores
+  cuentaActions: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: Colors.borde,
+  },
+  actionDivider: { width: 1, backgroundColor: Colors.borde },
   verificarBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderTopWidth: 1,
-    borderTopColor: Colors.borde,
     paddingVertical: 12,
     backgroundColor: Colors.celesteLight,
   },
@@ -466,6 +496,20 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.semiBold,
     fontSize: 14,
     color: Colors.celeste,
+  },
+  eliminarBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    backgroundColor: Colors.rojoLight,
+  },
+  eliminarBtnText: {
+    fontFamily: Fonts.semiBold,
+    fontSize: 14,
+    color: Colors.rojo,
   },
 
   // Agregar cuenta

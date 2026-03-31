@@ -55,6 +55,7 @@ export interface Movimiento {
   fecha: string;
   imagen_path: string | null;
   datos_ocr: string | null;  // JSON string
+  numero_operacion: string | null;
   creado_en: string;
   // Joins (para UI)
   cuenta_nombre?: string;
@@ -81,6 +82,7 @@ export interface ParsedTransaction {
   fecha: string;
   numero_operacion?: string;
   persona?: string;
+  telefono?: string;
   banco?: string;
 }
 

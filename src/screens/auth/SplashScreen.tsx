@@ -7,11 +7,12 @@ import { getSessionUser } from '../../services/auth';
 import { useAppStore } from '../../store/useAppStore';
 import { Colors } from '../../constants/Colors';
 import { Fonts } from '../../constants/Fonts';
+import { useIsFocused } from '@react-navigation/native';
 
 type Props = StackScreenProps<AuthStackParamList, 'Splash'>;
 
 export function SplashScreen({ navigation }: Props) {
-  const { setUsuario, setAmountsHidden } = useAppStore();
+  const { setUsuario, setAmountsHidden, loggedOut, setLoggedOut } = useAppStore();
 
   // Animaciones
   const logoScale   = useRef(new Animated.Value(0)).current;
@@ -44,12 +45,17 @@ export function SplashScreen({ navigation }: Props) {
 
     // 3. Tras 1.8s, verificar sesión y redirigir
     const timer = setTimeout(async () => {
+      // Si el usuario cerró sesión explícitamente, ir directo al Login
+      if (loggedOut) {
+        setLoggedOut(false);
+        navigation.replace('Login');
+        return;
+      }
       try {
         const usuario = await getSessionUser();
         if (usuario) {
           setAmountsHidden(usuario.ocultar_montos === 1);
           setUsuario(usuario);
-          // RootNavigator auto-cambia a App al setUsuario
         } else {
           navigation.replace('Login');
         }

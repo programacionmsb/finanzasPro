@@ -4,6 +4,7 @@ import { RegistroScreen }       from '../screens/registro/RegistroScreen';
 import { HistorialScreen }      from '../screens/historial/HistorialScreen';
 import { AjustesScreen }        from '../screens/ajustes/AjustesScreen';
 import { ConciliacionScreen }   from '../screens/cuentas/ConciliacionScreen';
+import { CuentaFormScreen }     from '../screens/cuentas/CuentaFormScreen';
 import { CategoriaFormScreen }  from '../screens/categorias/CategoriaFormScreen';
 import { AppStackParamList }    from '../types/navigation';
 import { Colors } from '../constants/Colors';
@@ -58,6 +59,12 @@ export function AppNavigator() {
         name="Conciliacion"
         component={ConciliacionScreen}
         options={{ title: 'Verificar Saldo' }}
+      />
+
+      <Stack.Screen
+        name="CuentaForm"
+        component={CuentaFormScreen}
+        options={{ title: 'Nueva cuenta' }}
       />
 
       <Stack.Screen

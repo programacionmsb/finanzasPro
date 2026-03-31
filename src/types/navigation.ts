@@ -35,6 +35,7 @@ export type AppStackParamList = {
   Ajustes:        undefined;
   Conciliacion:   { cuentaId: number };
   CategoriaForm:  { categoriaId?: number; parentId?: number; tipo?: 'ingreso' | 'egreso' };
+  CuentaForm:     undefined;
 };
 
 // ── Root ──────────────────────────────────────

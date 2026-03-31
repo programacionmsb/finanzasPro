@@ -79,6 +79,7 @@ function parseFecha(texto: string): string {
 /**
  * Extrae el nombre de la persona involucrada en la transacción.
  * Prioriza etiquetas explícitas (A:, Para:, De:), luego heurística posicional.
+ * Maneja el caso donde ML Kit fusiona nombre + fecha en una sola línea.
  */
 function extractPersona(texto: string): string {
   // Etiquetas explícitas: "A: Juan", "Para: María", "De: Pedro"
@@ -90,18 +91,37 @@ function extractPersona(texto: string): string {
   const idx = lines.findIndex(l => /[Ss]\s*\//.test(l));
   if (idx >= 0 && idx + 1 < lines.length) {
     const next = lines[idx + 1];
+
+    // ML Kit a veces fusiona nombre + fecha en una sola línea.
+    // Si hay una fecha embebida, extraer solo la parte antes de ella.
+    const fechaIdx = next.search(/\d{1,2}\s+[a-záéíóú]{3}\.?\s+\d{4}|\d{1,2}[\/\-]\d{2}[\/\-]\d{2,4}/i);
+    const candidato = fechaIdx > 0 ? next.substring(0, fechaIdx).trim() : next;
+
     if (
-      !/\d{1,2}[\/\-]\d{2}[\/\-]\d{2,4}/.test(next) && // no es fecha
-      !/\d{1,2}\s+[a-z]{3}\.?\s+\d{4}/i.test(next) &&  // no es "30 mar. 2026"
-      !/Operaci/i.test(next) &&                           // no es nro operación
-      !/Mensaje/i.test(next) &&                           // no es cabecera de mensaje
-      !/Descripci/i.test(next) &&
-      !/^\d{5,}$/.test(next) &&                          // no es solo número largo
-      next.length >= 2 && next.length < 60
+      !/Operaci/i.test(candidato) &&
+      !/Mensaje/i.test(candidato) &&
+      !/Descripci/i.test(candidato) &&
+      !/DATOS/i.test(candidato) &&
+      !/^\d{5,}$/.test(candidato) &&
+      candidato.length >= 2 && candidato.length < 80
     ) {
-      return next;
+      return candidato;
     }
   }
+  return '';
+}
+
+/**
+ * Extrae el número de celular peruano del texto OCR.
+ * Acepta: "987 654 321", "+51 987654321", "51 9XX XXX XXX"
+ */
+function extractTelefono(texto: string): string {
+  // Con prefijo internacional +51 o 51
+  const m1 = texto.match(/(?:\+51|51)\s*([9]\d{2}[\s\-]?\d{3}[\s\-]?\d{3})/);
+  if (m1) return m1[1].replace(/[\s\-]/g, '');
+  // Celular peruano suelto: 9XXXXXXXX con o sin espacios
+  const m2 = texto.match(/\b(9\d{2}[\s]?\d{3}[\s]?\d{3})\b/);
+  if (m2) return m2[1].replace(/\s/g, '');
   return '';
 }
 
@@ -121,6 +141,51 @@ function extractMensaje(texto: string): string {
   return '';
 }
 
+// Plataformas/palabras conocidas que aparecen como intermedias en el comprobante Yape
+const PALABRAS_INTERMEDIAS = /^(yape|plin|bcp|interbank|bbva|destino|origen|banco|cuenta|soles?)$/i;
+
+/**
+ * Extrae el número de operación de Yape.
+ * Puede ser alfanumérico. Siempre es el último dato del comprobante.
+ * Estructura típica: "Nro. de operación\nYape\nbc6a15e4"
+ */
+function extractNroOperacionYape(texto: string): string {
+  const lineas = texto.split(/[\n\r]+/).map(l => l.trim()).filter(Boolean);
+
+  // Estrategia 1 — buscar la etiqueta y tomar el valor 2 líneas después
+  // (saltando la línea intermedia tipo "Yape", "Plin", etc.)
+  const idxLabel = lineas.findIndex(l =>
+    /nro\.?\s*de\s*operaci[oó]n|n[uú]mero\s*de\s*operaci[oó]n/i.test(l)
+  );
+  if (idxLabel !== -1) {
+    // Buscar el primer valor alfanumérico después de la etiqueta, saltando intermedios conocidos
+    for (let i = idxLabel + 1; i < lineas.length; i++) {
+      const l = lineas[i];
+      if (!PALABRAS_INTERMEDIAS.test(l) && /^[a-zA-Z0-9]{4,}$/.test(l)) {
+        return l;
+      }
+    }
+  }
+
+  // Estrategia 2 — última línea alfanumérica del texto (sin espacios, 4+ chars)
+  for (let i = lineas.length - 1; i >= 0; i--) {
+    const l = lineas[i];
+    if (
+      /^[a-zA-Z0-9]{4,}$/.test(l) &&
+      !PALABRAS_INTERMEDIAS.test(l) &&
+      !/^\d{1,2}\/\d{2}\/\d{2,4}$/.test(l) &&
+      !/^\d{1,2}:\d{2}/.test(l) &&
+      !/^[Ss]\s*\//.test(l) &&
+      !/^\d{4}$/.test(l) &&
+      !/^(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)$/i.test(l)
+    ) {
+      return l;
+    }
+  }
+
+  return '0';
+}
+
 // ── Parsers individuales ─────────────────────────────────────────────────
 
 /**
@@ -137,21 +202,32 @@ function parseYape(texto: string): ParsedTransaction | null {
   const monto = parseMonto(texto);
   if (!monto) return null;
 
-  const persona = extractPersona(texto);
-  const mensaje = extractMensaje(texto);
-  const opMatch = texto.match(/(?:Operaci[oó]n\s*N[°º]?:?\s*|Nro\.\s*de\s*operaci[oó]n\s*[\n\r]+\s*)(\d+)/i);
-
-  // Descripción: preferir el mensaje escrito por el usuario
-  let descripcion: string;
-  if (mensaje) {
-    descripcion = persona
-      ? `${mensaje} (${esIngreso ? 'de' : 'a'} ${persona})`
-      : mensaje;
-  } else if (persona) {
-    descripcion = `Yape ${esIngreso ? 'de' : 'a'} ${persona}`;
+  // Extraer la frase exacta de acción que aparece en el comprobante
+  let accion: string;
+  if (esIngreso) {
+    if (/¡TE YAPEARON!/i.test(upper))      accion = '¡Te Yapearon!';
+    else if (/TE YAPEARON/i.test(upper))   accion = 'Te Yapearon';
+    else if (/TE ENVI[OÓ]/i.test(upper))   accion = 'Te envió';
+    else                                    accion = 'Te yaparon';
   } else {
-    descripcion = `Yape ${esIngreso ? 'recibido' : 'enviado'}`;
+    if (/¡YAPEASTE!/i.test(upper))          accion = '¡Yapeaste!';
+    else if (/YAPEO EXITOSO/i.test(upper))  accion = 'Yapeo exitoso';
+    else if (/ENVIASTE A/i.test(upper))     accion = 'Enviaste a';
+    else                                    accion = 'Yapeaste';
   }
+
+  const persona  = extractPersona(texto);
+  const telefono = extractTelefono(texto);
+  const nroOperacion = extractNroOperacionYape(texto);
+
+  // Descripción: "[acción] a/de [nombre] [teléfono]"
+  const partes: string[] = [accion];
+  if (persona) {
+    partes.push(esIngreso ? 'de' : 'a');
+    partes.push(persona);
+  }
+  if (telefono) partes.push(telefono);
+  const descripcion = partes.join(' ');
 
   return {
     tipo:             esIngreso ? 'ingreso' : 'egreso',
@@ -159,8 +235,9 @@ function parseYape(texto: string): ParsedTransaction | null {
     descripcion,
     origen:           'yape',
     fecha:            parseFecha(texto),
-    numero_operacion: opMatch?.[1],
+    numero_operacion: nroOperacion,
     persona,
+    telefono,
   };
 }
 

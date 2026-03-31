@@ -1,36 +1,39 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Alert } from 'react-native';
 import { useAppStore } from '../store/useAppStore';
-import { insertMovimiento } from '../services/db';
+import { insertMovimiento, getDb } from '../services/db';
+import { subirMovimiento } from '../services/firestore';
+import { Movimiento, ParsedTransaction } from '../types';
 import { toSQLiteDate } from '../utils/formatters';
-import { ParsedTransaction, Movimiento } from '../types';
 
 export type TipoMovimiento = 'ingreso' | 'egreso' | 'transferencia';
 
 export interface RegistroFormState {
-  tipo:             TipoMovimiento;
-  monto:            string;
-  descripcion:      string;
-  cuentaId:         number | null;
-  cuentaDestinoId:  number | null;
-  categoriaId:      number | null;
-  fecha:            Date;
-  origen:           Movimiento['origen'];
-  imagenPath:       string | null;
-  datosOcr:         string | null;
+  tipo:              TipoMovimiento;
+  monto:             string;
+  descripcion:       string;
+  cuentaId:          number | null;
+  cuentaDestinoId:   number | null;
+  categoriaId:       number | null;
+  fecha:             Date;
+  origen:            Movimiento['origen'];
+  imagenPath:        string | null;
+  datosOcr:          string | null;
+  numeroOperacion:   string;
 }
 
 const INITIAL: RegistroFormState = {
-  tipo:             'egreso',
-  monto:            '',
-  descripcion:      '',
-  cuentaId:         null,
-  cuentaDestinoId:  null,
-  categoriaId:      null,
-  fecha:            new Date(),
-  origen:           'manual',
-  imagenPath:       null,
-  datosOcr:         null,
+  tipo:              'egreso',
+  monto:             '',
+  descripcion:       '',
+  cuentaId:          null,
+  cuentaDestinoId:   null,
+  categoriaId:       null,
+  fecha:             new Date(),
+  origen:            'manual',
+  imagenPath:        null,
+  datosOcr:          null,
+  numeroOperacion:   '0',
 };
 
 export function useRegistroForm(onSaved?: () => void) {
@@ -58,14 +61,24 @@ export function useRegistroForm(onSaved?: () => void) {
     setForm(f => {
       const cambio = f.tipo !== tipo;
       if (cambio) setCatReset(true);
+
+      // Auto-seleccionar subcategoría "Internet" cuando el tipo es ingreso
+      let categoriaId = (cambio || tipo === 'transferencia') ? null : f.categoriaId;
+      if (tipo === 'ingreso') {
+        const internet = categorias.find(
+          c => c.nombre === 'Internet' && c.tipo === 'ingreso' && c.nivel === 2
+        );
+        if (internet) categoriaId = internet.id;
+      }
+
       return {
         ...f,
         tipo,
-        categoriaId:    (cambio || tipo === 'transferencia') ? null : f.categoriaId,
+        categoriaId,
         cuentaDestinoId: tipo !== 'transferencia' ? null : f.cuentaDestinoId,
       };
     });
-  }, []);
+  }, [categorias]);
 
   const setCategoria = useCallback((id: number) => {
     setCatReset(false);
@@ -80,16 +93,25 @@ export function useRegistroForm(onSaved?: () => void) {
 
   /** Pre-carga el formulario con datos parseados (OCR o texto compartido) */
   const prefill = useCallback((parsed: ParsedTransaction) => {
+    // Yape (ingreso o egreso) → pre-seleccionar cuenta BCP automáticamente
+    let cuentaIdAuto: number | null = null;
+    if (parsed.origen === 'yape') {
+      const bcp = cuentas.find(c => /bcp/i.test(c.nombre));
+      if (bcp) cuentaIdAuto = bcp.id;
+    }
+
     setForm(f => ({
       ...f,
-      tipo:        parsed.tipo,
-      monto:       String(parsed.monto),
-      descripcion: parsed.descripcion,
-      origen:      parsed.origen,
-      fecha:       new Date(parsed.fecha.replace(' ', 'T')),
+      tipo:             parsed.tipo,
+      monto:            String(parsed.monto),
+      descripcion:      parsed.descripcion,
+      origen:           parsed.origen,
+      fecha:            new Date(parsed.fecha.replace(' ', 'T')),
+      numeroOperacion:  parsed.numero_operacion ?? '0',
+      ...(cuentaIdAuto !== null && { cuentaId: cuentaIdAuto }),
     }));
     setCatReset(false);
-  }, []);
+  }, [cuentas]);
 
   const resetForm = useCallback(() => {
     setForm(INITIAL);
@@ -127,7 +149,16 @@ export function useRegistroForm(onSaved?: () => void) {
         fecha:             toSQLiteDate(form.fecha),
         imagen_path:       form.imagenPath,
         datos_ocr:         form.datosOcr,
+        numero_operacion:  form.numeroOperacion || '0',
       });
+
+      // Subir a Firestore en segundo plano (no bloquea el guardado local)
+      const db = await getDb();
+      const saved = await db.getFirstAsync<Movimiento>(
+        'SELECT * FROM movimientos WHERE usuario_id = ? ORDER BY id DESC LIMIT 1',
+        [usuario.id]
+      );
+      if (saved) subirMovimiento(usuario.id, saved).catch(() => {});
 
       await Promise.all([refreshCuentas(), refreshMovimientos()]);
       resetForm();

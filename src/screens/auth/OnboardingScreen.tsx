@@ -9,6 +9,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthStackParamList, MonedaCode } from '../../types';
 import { upsertUsuario, insertCuenta, insertCategoriasDefault } from '../../services/db';
+import { subirTodoAFirestore } from '../../services/firestore';
+import firestore from '@react-native-firebase/firestore';
 import { useAppStore } from '../../store/useAppStore';
 import { CUENTAS_TEMPLATE } from '../../constants/Categories';
 import { Colors } from '../../constants/Colors';
@@ -141,7 +143,20 @@ export function OnboardingScreen({ route }: Props) {
       // 3. Insertar categorías por defecto
       await insertCategoriasDefault(usuario.id);
 
-      // 4. Setear usuario en store → RootNavigator auto-cambia a App
+      // 4. Guardar perfil de usuario en Firestore
+      await firestore().collection('users').doc(usuario.id).set({
+        nombre:         usuario.nombre,
+        email:          usuario.email,
+        foto_url:       usuario.foto_url ?? null,
+        moneda,
+        ocultar_montos: 0,
+        creado_en:      new Date().toISOString(),
+      });
+
+      // 5. Subir cuentas y categorías a Firestore
+      await subirTodoAFirestore(usuario.id);
+
+      // 6. Setear usuario en store → RootNavigator auto-cambia a App
       setUsuario({
         id:             usuario.id,
         nombre:         usuario.nombre,

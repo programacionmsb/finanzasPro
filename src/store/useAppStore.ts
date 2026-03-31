@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Usuario, Cuenta, Movimiento, Categoria } from '../types';
-import { getCuentas, calcularSaldo, getMovimientos, getCategorias } from '../services/db';
+import { getCuentas, calcularSaldo, getMovimientos, getCategorias, ensureCategoriasExtra } from '../services/db';
 
 interface AppStore {
   // ── Usuario ────────────────────────────────
@@ -34,6 +34,10 @@ interface AppStore {
   // ── Imagen compartida (share intent) ───────
   imagenCompartida: string | null;
   setImagenCompartida: (uri: string | null) => void;
+
+  // ── Logout explícito ───────────────────────
+  loggedOut: boolean;
+  setLoggedOut: (v: boolean) => void;
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -87,6 +91,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const { usuario } = get();
     if (!usuario) return;
     try {
+      await ensureCategoriasExtra(usuario.id);
       const cats = await getCategorias(usuario.id);
       set({ categorias: cats });
     } catch (e) {
@@ -104,4 +109,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   // ── Imagen compartida (share intent) ───────
   imagenCompartida: null,
   setImagenCompartida: (uri) => set({ imagenCompartida: uri }),
+
+  // ── Logout explícito ───────────────────────
+  loggedOut: false,
+  setLoggedOut: (v) => set({ loggedOut: v }),
 }));

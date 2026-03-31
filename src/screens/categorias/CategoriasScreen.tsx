@@ -9,6 +9,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '../../store/useAppStore';
+import { contarMovimientosCategoria, eliminarCategoria } from '../../services/db';
 import { AppStackParamList } from '../../types/navigation';
 import { Categoria } from '../../types';
 import { Colors } from '../../constants/Colors';
@@ -33,10 +34,12 @@ function NodoCat({
   cat,
   nivel,
   nav,
+  onEliminar,
 }: {
   cat: Categoria;
   nivel: number;
   nav: Nav;
+  onEliminar: (cat: Categoria) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const tieneHijos = (cat.subcategorias?.length ?? 0) > 0;
@@ -68,12 +71,20 @@ function NodoCat({
         >
           <Ionicons name="pencil-outline" size={16} color={Colors.celeste} />
         </TouchableOpacity>
+        {/* Eliminar */}
+        <TouchableOpacity
+          style={st.editBtn}
+          onPress={() => onEliminar(cat)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="trash-outline" size={16} color={Colors.rojo} />
+        </TouchableOpacity>
       </View>
 
       {tieneHijos && expanded && (
         <View style={[st.children, { borderLeftColor: cat.color + '55' }]}>
           {cat.subcategorias!.map(sub => (
-            <NodoCat key={sub.id} cat={sub} nivel={nivel + 1} nav={nav} />
+            <NodoCat key={sub.id} cat={sub} nivel={nivel + 1} nav={nav} onEliminar={onEliminar} />
           ))}
           {/* Agregar subcategoría del nivel siguiente si nivel < 3 */}
           {nivel < 2 && (
@@ -111,6 +122,35 @@ export function CategoriasScreen() {
     [categorias, tabActivo]
   );
 
+  async function handleEliminar(cat: Categoria) {
+    const movsPropios = await contarMovimientosCategoria(cat.id);
+    let movsHijos = 0;
+    for (const sub of cat.subcategorias ?? []) {
+      movsHijos += await contarMovimientosCategoria(sub.id);
+    }
+    const totalMovs = movsPropios + movsHijos;
+
+    if (totalMovs > 0) {
+      Alert.alert(
+        'No se puede eliminar',
+        `"${cat.nombre}" tiene ${totalMovs} movimiento(s) asociado(s). Reasigna o elimina esos movimientos primero.`
+      );
+      return;
+    }
+
+    Alert.alert('Eliminar categoría', `¿Eliminar "${cat.nombre}"? Esta acción no se puede deshacer.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: async () => {
+          await eliminarCategoria(cat.id);
+          await refreshCategorias();
+        },
+      },
+    ]);
+  }
+
   return (
     <View style={st.safe}>
       {/* ── Tabs ──────────────────────────────────── */}
@@ -142,7 +182,7 @@ export function CategoriasScreen() {
         ) : (
           arbol.map(cat => (
             <View key={cat.id} style={st.rootCard}>
-              <NodoCat cat={cat} nivel={0} nav={nav} />
+              <NodoCat cat={cat} nivel={0} nav={nav} onEliminar={handleEliminar} />
             </View>
           ))
         )}

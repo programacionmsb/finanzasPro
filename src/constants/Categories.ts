@@ -86,8 +86,26 @@ export const CATEGORIAS_DEFAULT: CategoriaDefault[] = [
       { nombre: 'Libros', icono: '📖' },
     ],
   },
+  {
+    nombre: 'Servicios',
+    icono: '🔧',
+    color: '#5D6D7E',
+    tipo: 'egreso',
+    subcategorias: [
+      { nombre: 'Internet', icono: '🌐' },
+    ],
+  },
 
   // ── INGRESOS ─────────────────────────────────
+  {
+    nombre: 'Servicios',
+    icono: '🔧',
+    color: '#5D6D7E',
+    tipo: 'ingreso',
+    subcategorias: [
+      { nombre: 'Internet', icono: '🌐' },
+    ],
+  },
   {
     nombre: 'Trabajo',
     icono: '💼',

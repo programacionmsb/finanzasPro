@@ -79,12 +79,21 @@ export async function initDB(): Promise<void> {
       fecha             DATETIME NOT NULL,
       imagen_path       TEXT,
       datos_ocr         TEXT,
+      numero_operacion  TEXT DEFAULT '0',
       creado_en         DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
       FOREIGN KEY (cuenta_id) REFERENCES cuentas(id),
       FOREIGN KEY (categoria_id) REFERENCES categorias(id)
     );
 
+  `);
+
+  // Migración: agregar numero_operacion si no existe (para DBs ya creadas)
+  try {
+    await db.execAsync(`ALTER TABLE movimientos ADD COLUMN numero_operacion TEXT DEFAULT '0'`);
+  } catch { /* columna ya existe */ }
+
+  await db.execAsync(`
     CREATE TABLE IF NOT EXISTS conciliaciones (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       cuenta_id  INTEGER NOT NULL,
@@ -167,6 +176,44 @@ export async function deleteCuenta(id: number): Promise<void> {
   await db.runAsync('UPDATE cuentas SET activa = 0 WHERE id = ?', [id]);
 }
 
+export async function contarMovimientosCuenta(cuentaId: number): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ total: number }>(
+    'SELECT COUNT(*) as total FROM movimientos WHERE cuenta_id = ? OR cuenta_destino_id = ?',
+    [cuentaId, cuentaId]
+  );
+  return row?.total ?? 0;
+}
+
+export async function eliminarCuentaDefinitivo(cuentaId: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM movimientos WHERE cuenta_id = ? OR cuenta_destino_id = ?', [cuentaId, cuentaId]);
+  await db.runAsync('DELETE FROM cuentas WHERE id = ?', [cuentaId]);
+}
+
+export async function contarMovimientosCategoria(categoriaId: number): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ total: number }>(
+    'SELECT COUNT(*) as total FROM movimientos WHERE categoria_id = ?',
+    [categoriaId]
+  );
+  return row?.total ?? 0;
+}
+
+export async function eliminarCategoria(categoriaId: number): Promise<void> {
+  const db = await getDb();
+  // Desasociar movimientos de esta categoría y sus subcategorías
+  const subs = await db.getAllAsync<{ id: number }>(
+    'SELECT id FROM categorias WHERE parent_id = ?', [categoriaId]
+  );
+  for (const sub of subs) {
+    await db.runAsync('UPDATE movimientos SET categoria_id = NULL WHERE categoria_id = ?', [sub.id]);
+    await db.runAsync('DELETE FROM categorias WHERE id = ?', [sub.id]);
+  }
+  await db.runAsync('UPDATE movimientos SET categoria_id = NULL WHERE categoria_id = ?', [categoriaId]);
+  await db.runAsync('DELETE FROM categorias WHERE id = ?', [categoriaId]);
+}
+
 /**
  * Calcula el saldo actual de una cuenta dinámicamente.
  * saldo = saldo_inicial + ingresos - egresos + transferencias_recibidas - transferencias_enviadas
@@ -242,6 +289,52 @@ export async function updateCategoria(id: number, data: Partial<Categoria>): Pro
 }
 
 /**
+ * Asegura que ciertas categorías existan para el usuario.
+ * Se usa para agregar categorías nuevas a usuarios existentes sin borrar las suyas.
+ */
+export async function ensureCategoriasExtra(usuarioId: string): Promise<void> {
+  const db = await getDb();
+
+  const maxOrden = await db.getFirstAsync<{ max: number }>(
+    `SELECT COALESCE(MAX(orden), 0) as max FROM categorias WHERE usuario_id = ? AND nivel = 1`,
+    [usuarioId]
+  );
+  let orden = (maxOrden?.max ?? 0) + 1;
+
+  for (const tipo of ['egreso', 'ingreso'] as const) {
+    const existe = await db.getFirstAsync<{ id: number }>(
+      `SELECT id FROM categorias WHERE usuario_id = ? AND nombre = 'Servicios' AND tipo = ? AND nivel = 1`,
+      [usuarioId, tipo]
+    );
+    if (existe) continue;
+
+    const parentId = await insertCategoria({
+      usuario_id: usuarioId,
+      nombre:     'Servicios',
+      icono:      '🔧',
+      color:      '#5D6D7E',
+      tipo,
+      parent_id:  null,
+      nivel:      1,
+      orden:      orden++,
+      activa:     1,
+    });
+
+    await insertCategoria({
+      usuario_id: usuarioId,
+      nombre:     'Internet',
+      icono:      '🌐',
+      color:      '#5D6D7E',
+      tipo,
+      parent_id:  parentId,
+      nivel:      2,
+      orden:      0,
+      activa:     1,
+    });
+  }
+}
+
+/**
  * Inserta las categorías por defecto para un nuevo usuario.
  */
 export async function insertCategoriasDefault(usuarioId: string): Promise<void> {
@@ -297,10 +390,10 @@ export async function insertCategoriasDefault(usuarioId: string): Promise<void> 
 
 export async function getMovimientos(
   usuarioId: string,
-  options?: { limite?: number; offset?: number; cuentaId?: number; tipo?: string; busqueda?: string }
+  options?: { limite?: number; offset?: number; cuentaId?: number; tipo?: string; busqueda?: string; nroOperacion?: string }
 ): Promise<Movimiento[]> {
   const db = await getDb();
-  const { limite = 20, offset = 0, cuentaId, tipo, busqueda } = options ?? {};
+  const { limite = 20, offset = 0, cuentaId, tipo, busqueda, nroOperacion } = options ?? {};
 
   const where: string[] = ['m.usuario_id = ?'];
   const params: (string | number)[] = [usuarioId];
@@ -313,10 +406,14 @@ export async function getMovimientos(
     where.push('m.tipo = ?');
     params.push(tipo);
   }
+  if (nroOperacion && nroOperacion.trim() && nroOperacion.trim() !== '0') {
+    where.push('m.numero_operacion = ?');
+    params.push(nroOperacion.trim());
+  }
   if (busqueda && busqueda.trim()) {
     const q = `%${busqueda.trim()}%`;
-    where.push('(m.descripcion LIKE ? OR c.nombre LIKE ? OR m.origen LIKE ?)');
-    params.push(q, q, q);
+    where.push('(m.descripcion LIKE ? OR c.nombre LIKE ? OR m.origen LIKE ? OR m.numero_operacion LIKE ?)');
+    params.push(q, q, q, q);
   }
 
   params.push(limite, offset);
@@ -342,12 +439,13 @@ export async function insertMovimiento(
   const result = await db.runAsync(
     `INSERT INTO movimientos
        (usuario_id, cuenta_id, categoria_id, tipo, monto, descripcion, origen,
-        cuenta_destino_id, fecha, imagen_path, datos_ocr)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        cuenta_destino_id, fecha, imagen_path, datos_ocr, numero_operacion)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       mov.usuario_id, mov.cuenta_id, mov.categoria_id ?? null, mov.tipo, mov.monto,
       mov.descripcion ?? null, mov.origen, mov.cuenta_destino_id ?? null,
       mov.fecha, mov.imagen_path ?? null, mov.datos_ocr ?? null,
+      mov.numero_operacion ?? '0',
     ]
   );
   return result.lastInsertRowId;
