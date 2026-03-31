@@ -1,18 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
 
 import { DashboardScreen }  from '../screens/dashboard/DashboardScreen';
 import { CuentasScreen }    from '../screens/cuentas/CuentasScreen';
 import { CategoriasScreen } from '../screens/categorias/CategoriasScreen';
 import { ReportesScreen }   from '../screens/reportes/ReportesScreen';
 import { RegistroBottomSheet } from './RegistroBottomSheet';
-import { TabParamList } from '../types/navigation';
+import { TabParamList, AppStackParamList } from '../types/navigation';
 import { Colors } from '../constants/Colors';
 import { Fonts } from '../constants/Fonts';
+import { useAppStore } from '../store/useAppStore';
 
 const Tab = createBottomTabNavigator<TabParamList>();
 
@@ -47,13 +51,26 @@ function makeAddTabButton(onPress: () => void) {
 // ── Tab Navigator ─────────────────────────────────────────────────────────
 export function TabNavigator() {
   const [sheetVisible, setSheetVisible] = useState(false);
+  const insets = useSafeAreaInsets();
+  const { bottom } = insets;
+  const navigation = useNavigation<StackNavigationProp<AppStackParamList>>();
+  const imagenCompartida = useAppStore(s => s.imagenCompartida);
+
+  // Auto-navegar a FotoPanel cuando se recibe una imagen desde otra app
+  useEffect(() => {
+    if (imagenCompartida) {
+      navigation.navigate('Registro', { modo: 'foto' });
+    }
+  }, [imagenCompartida]);
+  console.log('[TabNav] insets completos:', JSON.stringify(insets));
+  console.log('[TabNav] paddingBottom aplicado:', 8 + bottom);
 
   return (
     <>
       <Tab.Navigator
         screenOptions={{
           headerShown: false,
-          tabBarStyle: styles.tabBar,
+          tabBarStyle: [styles.tabBar, { paddingBottom: 8 + bottom }],
           tabBarActiveTintColor: Colors.azul,
           tabBarInactiveTintColor: Colors.gris,
           tabBarLabelStyle: styles.tabLabel,
@@ -132,8 +149,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.blanco,
     borderTopColor: Colors.borde,
     borderTopWidth: 1,
-    height: Platform.OS === 'ios' ? 84 : 64,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
     paddingTop: 8,
     elevation: 8,
     shadowColor: '#000',

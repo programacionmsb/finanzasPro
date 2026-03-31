@@ -1,12 +1,14 @@
-import { useRef } from 'react';
+import { useRef, useState, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  ScrollView, FlatList, StyleSheet, ActivityIndicator, Alert,
+  ScrollView, FlatList, StyleSheet, ActivityIndicator, Alert, Modal, Platform,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { useHistorial } from '../../hooks/useHistorial';
-import { buildCategoriPath } from '../../components/forms/CategoriaSelector';
+import { buildCategoriPath, CategoriaSelector } from '../../components/forms/CategoriaSelector';
+import { CuentaSelector } from '../../components/forms/CuentaSelector';
 import { formatMonto } from '../../utils/formatters';
 import { Movimiento } from '../../types';
 import { Colors } from '../../constants/Colors';
@@ -31,28 +33,43 @@ function MovimientoItem({
   mov,
   categorias,
   onDelete,
+  onEdit,
 }: {
   mov: Movimiento;
   categorias: ReturnType<typeof useHistorial>['categorias'];
   onDelete: (id: number) => void;
+  onEdit: (mov: Movimiento) => void;
 }) {
   const swipeRef = useRef<Swipeable>(null);
   const cfg = ORIGEN_CONFIG[mov.origen] ?? ORIGEN_CONFIG.manual;
   const catPath = mov.categoria_id
     ? buildCategoriPath(mov.categoria_id, categorias)
     : null;
+  // Extrae HH:MM de "YYYY-MM-DD HH:MM:SS"
+  const hora = mov.fecha?.length > 10 ? mov.fecha.substring(11, 16) : '';
 
   function handleDelete() {
     swipeRef.current?.close();
     onDelete(mov.id);
   }
 
+  function handleEdit() {
+    swipeRef.current?.close();
+    onEdit(mov);
+  }
+
   function renderRightActions() {
     return (
-      <TouchableOpacity style={st.deleteAction} onPress={handleDelete} activeOpacity={0.85}>
-        <Ionicons name="trash-outline" size={22} color={Colors.blanco} />
-        <Text style={st.deleteActionText}>Borrar</Text>
-      </TouchableOpacity>
+      <View style={st.swipeActions}>
+        <TouchableOpacity style={st.editAction} onPress={handleEdit} activeOpacity={0.85}>
+          <Ionicons name="pencil-outline" size={22} color={Colors.blanco} />
+          <Text style={st.swipeActionText}>Editar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={st.deleteAction} onPress={handleDelete} activeOpacity={0.85}>
+          <Ionicons name="trash-outline" size={22} color={Colors.blanco} />
+          <Text style={st.swipeActionText}>Borrar</Text>
+        </TouchableOpacity>
+      </View>
     );
   }
 
@@ -83,18 +100,236 @@ function MovimientoItem({
           <Text
             style={[
               st.itemMonto,
-              mov.tipo === 'ingreso' ? st.montoIngreso : st.montoEgreso,
+              mov.tipo === 'ingreso'      ? st.montoIngreso :
+              mov.tipo === 'transferencia'? st.montoTransfer :
+                                           st.montoEgreso,
             ]}
           >
-            {mov.tipo === 'ingreso' ? '+' : '−'}{' '}
+            {mov.tipo === 'ingreso' ? '+' : mov.tipo === 'transferencia' ? '⇄' : '−'}{' '}
             {formatMonto(mov.monto)}
           </Text>
           <Text style={st.itemTipo}>
-            {mov.tipo === 'ingreso' ? '↑ Ingreso' : '↓ Egreso'}
+            {mov.tipo === 'ingreso' ? '↑ Ingreso' :
+             mov.tipo === 'transferencia' ? '⇄ Transferencia' :
+             '↓ Egreso'}
           </Text>
+          {hora ? <Text style={st.itemHora}>{hora}</Text> : null}
         </View>
       </View>
     </Swipeable>
+  );
+}
+
+// ── Modal de edición ──────────────────────────────────────────────────────
+
+interface EditForm {
+  tipo: 'ingreso' | 'egreso';
+  monto: string;
+  descripcion: string;
+  cuentaId: number | null;
+  categoriaId: number | null;
+  fecha: Date;
+}
+
+function EditModal({
+  mov,
+  cuentas,
+  categorias,
+  onSave,
+  onClose,
+}: {
+  mov: Movimiento;
+  cuentas: ReturnType<typeof useHistorial>['cuentas'];
+  categorias: ReturnType<typeof useHistorial>['categorias'];
+  onSave: (id: number, form: EditForm) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState<EditForm>({
+    tipo:        mov.tipo as 'ingreso' | 'egreso',
+    monto:       String(mov.monto),
+    descripcion: mov.descripcion ?? '',
+    cuentaId:    mov.cuenta_id,
+    categoriaId: mov.categoria_id ?? null,
+    fecha:       new Date(mov.fecha.replace(' ', 'T')),
+  });
+  const [saving, setSaving] = useState(false);
+  const [catReset, setCatReset] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+  const categoriasFiltradas = useMemo(
+    () => categorias.filter(c => c.tipo === form.tipo),
+    [form.tipo, categorias]
+  );
+
+  function setTipo(tipo: 'ingreso' | 'egreso') {
+    setForm(f => ({
+      ...f,
+      tipo,
+      categoriaId: f.tipo !== tipo ? null : f.categoriaId,
+    }));
+    setCatReset(true);
+  }
+
+  async function handleSave() {
+    const monto = parseFloat(form.monto.replace(',', '.'));
+    if (!form.monto || isNaN(monto) || monto <= 0) {
+      return Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
+    }
+    if (!form.cuentaId) {
+      return Alert.alert('Falta cuenta', 'Selecciona una cuenta.');
+    }
+    setSaving(true);
+    try {
+      await onSave(mov.id, { ...form, monto: form.monto });
+      onClose();
+    } catch {
+      Alert.alert('Error', 'No se pudo guardar. Intenta de nuevo.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={st.modalOverlay} activeOpacity={1} onPress={onClose} />
+      <View style={st.modalSheet}>
+        <View style={st.modalHandle} />
+        <Text style={st.modalTitle}>Editar movimiento</Text>
+
+        {/* Tipo */}
+        <View style={st.tipoRow}>
+          {(['ingreso', 'egreso'] as const).map(t => (
+            <TouchableOpacity
+              key={t}
+              style={[st.tipoBtn, form.tipo === t && (t === 'ingreso' ? st.tipoBtnIng : st.tipoBtnEgr)]}
+              onPress={() => setTipo(t)}
+            >
+              <Ionicons
+                name={t === 'ingreso' ? 'arrow-up-circle' : 'arrow-down-circle'}
+                size={18}
+                color={form.tipo === t ? Colors.blanco : t === 'ingreso' ? Colors.verde : Colors.rojo}
+              />
+              <Text style={[st.tipoBtnText, form.tipo === t && { color: Colors.blanco }]}>
+                {t === 'ingreso' ? 'Ingreso' : 'Egreso'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Monto */}
+        <Text style={st.fieldLabel}>Monto</Text>
+        <TextInput
+          style={st.fieldInput}
+          value={form.monto}
+          onChangeText={v => setForm(f => ({ ...f, monto: v }))}
+          keyboardType="decimal-pad"
+          placeholder="0.00"
+          placeholderTextColor={Colors.gris}
+        />
+
+        {/* Descripcion */}
+        <Text style={st.fieldLabel}>Descripción</Text>
+        <TextInput
+          style={st.fieldInput}
+          value={form.descripcion}
+          onChangeText={v => setForm(f => ({ ...f, descripcion: v }))}
+          placeholder="Opcional..."
+          placeholderTextColor={Colors.gris}
+        />
+
+        {/* Fecha y hora */}
+        <View style={st.fechaRow}>
+          <TouchableOpacity
+            style={st.fechaBtn}
+            onPress={() => setShowDatePicker(true)}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="calendar-outline" size={16} color={Colors.celeste} />
+            <Text style={st.fechaBtnText}>
+              {form.fecha.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={st.fechaBtn}
+            onPress={() => setShowTimePicker(true)}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="time-outline" size={16} color={Colors.celeste} />
+            <Text style={st.fechaBtnText}>
+              {String(form.fecha.getHours()).padStart(2, '0')}:{String(form.fecha.getMinutes()).padStart(2, '0')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {showDatePicker && (
+          <DateTimePicker
+            value={form.fecha}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            maximumDate={new Date()}
+            onChange={(_, date) => {
+              setShowDatePicker(Platform.OS === 'ios');
+              if (date) {
+                setForm(f => {
+                  const nueva = new Date(date);
+                  nueva.setHours(f.fecha.getHours(), f.fecha.getMinutes(), 0);
+                  return { ...f, fecha: nueva };
+                });
+              }
+            }}
+          />
+        )}
+
+        {showTimePicker && (
+          <DateTimePicker
+            value={form.fecha}
+            mode="time"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            is24Hour
+            onChange={(_, date) => {
+              setShowTimePicker(Platform.OS === 'ios');
+              if (date) {
+                setForm(f => {
+                  const nueva = new Date(f.fecha);
+                  nueva.setHours(date.getHours(), date.getMinutes(), 0);
+                  return { ...f, fecha: nueva };
+                });
+              }
+            }}
+          />
+        )}
+
+        {/* Cuenta */}
+        <CuentaSelector
+          cuentas={cuentas}
+          value={form.cuentaId}
+          onChange={id => setForm(f => ({ ...f, cuentaId: id }))}
+        />
+
+        {/* Categoría */}
+        <CategoriaSelector
+          categorias={categoriasFiltradas}
+          tipo={form.tipo}
+          value={form.categoriaId}
+          onChange={id => { setCatReset(false); setForm(f => ({ ...f, categoriaId: id })); }}
+          advertencia={catReset}
+        />
+
+        {/* Guardar */}
+        <TouchableOpacity
+          style={[st.saveBtn, saving && { opacity: 0.6 }]}
+          onPress={handleSave}
+          disabled={saving}
+          activeOpacity={0.85}
+        >
+          {saving
+            ? <ActivityIndicator color={Colors.blanco} />
+            : <Text style={st.saveBtnText}>GUARDAR CAMBIOS</Text>
+          }
+        </TouchableOpacity>
+      </View>
+    </Modal>
   );
 }
 
@@ -106,9 +341,26 @@ export function HistorialScreen() {
     filtro,   setFiltro,
     agrupados, movimientos,
     loading, loadingMore, noHayMas,
-    cargarMas, confirmarEliminar,
+    cargarMas, confirmarEliminar, actualizarMovimiento,
     cuentas, categorias,
   } = useHistorial();
+
+  const [editandoMov, setEditandoMov] = useState<Movimiento | null>(null);
+
+  async function handleGuardarEdicion(id: number, form: EditForm) {
+    const monto = parseFloat(form.monto.replace(',', '.'));
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const f = form.fecha;
+    const fecha = `${f.getFullYear()}-${pad(f.getMonth() + 1)}-${pad(f.getDate())} ${pad(f.getHours())}:${pad(f.getMinutes())}:00`;
+    await actualizarMovimiento(id, {
+      tipo:         form.tipo,
+      monto,
+      descripcion:  form.descripcion || null,
+      cuenta_id:    form.cuentaId!,
+      categoria_id: form.categoriaId,
+      fecha,
+    });
+  }
 
   // ── Chips de filtro ──────────────────────────────────────────────────
   const chips: { key: string; label: string }[] = [
@@ -144,6 +396,7 @@ export function HistorialScreen() {
         mov={item.mov}
         categorias={categorias}
         onDelete={confirmarEliminar}
+        onEdit={setEditandoMov}
       />
     );
   }
@@ -168,6 +421,17 @@ export function HistorialScreen() {
 
   return (
     <View style={st.safe}>
+      {/* ── Modal edición ──────────────────────────────── */}
+      {editandoMov && (
+        <EditModal
+          mov={editandoMov}
+          cuentas={cuentas}
+          categorias={categorias}
+          onSave={handleGuardarEdicion}
+          onClose={() => setEditandoMov(null)}
+        />
+      )}
+
       {/* ── Buscador ────────────────────────────────────── */}
       <View style={st.searchBar}>
         <Ionicons name="search-outline" size={18} color={Colors.gris} style={st.searchIcon} />
@@ -286,17 +550,69 @@ const st = StyleSheet.create({
   itemCuenta:   { fontFamily: Fonts.regular, fontSize: 11, color: Colors.borde, marginTop: 1 },
   itemMontoCol: { alignItems: 'flex-end' },
   itemMonto:    { fontFamily: Fonts.bold, fontSize: 15 },
-  montoIngreso: { color: Colors.verde },
-  montoEgreso:  { color: Colors.rojo },
+  montoIngreso:  { color: Colors.verde },
+  montoEgreso:   { color: Colors.rojo },
+  montoTransfer: { color: '#7B3FE4' },
   itemTipo:     { fontFamily: Fonts.regular, fontSize: 11, color: Colors.gris, marginTop: 2 },
+  itemHora:     { fontFamily: Fonts.regular, fontSize: 11, color: Colors.gris, marginTop: 1 },
 
-  // Swipe delete
-  deleteAction: {
-    backgroundColor: Colors.rojo, borderRadius: 14, marginBottom: 8,
-    justifyContent: 'center', alignItems: 'center',
-    paddingHorizontal: 20, gap: 4,
+  // Swipe actions — width explícito para que sean visibles
+  swipeActions: { flexDirection: 'row', alignSelf: 'stretch', marginBottom: 8 },
+  editAction: {
+    width: 80,
+    backgroundColor: Colors.celeste,
+    borderTopLeftRadius: 14, borderBottomLeftRadius: 14,
+    justifyContent: 'center', alignItems: 'center', gap: 4,
   },
-  deleteActionText: { fontFamily: Fonts.semiBold, fontSize: 12, color: Colors.blanco },
+  deleteAction: {
+    width: 80,
+    backgroundColor: Colors.rojo,
+    borderTopRightRadius: 14, borderBottomRightRadius: 14,
+    justifyContent: 'center', alignItems: 'center', gap: 4,
+  },
+  swipeActionText: { fontFamily: Fonts.semiBold, fontSize: 12, color: Colors.blanco },
+
+  // Edit modal
+  modalOverlay: {
+    ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  modalSheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: Colors.fondo, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 20, paddingBottom: 36, gap: 12,
+  },
+  modalHandle: {
+    alignSelf: 'center', width: 40, height: 4,
+    borderRadius: 2, backgroundColor: Colors.borde, marginBottom: 8,
+  },
+  modalTitle: { fontFamily: Fonts.bold, fontSize: 18, color: Colors.texto },
+  tipoRow: { flexDirection: 'row', gap: 12 },
+  tipoBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 11, borderRadius: 12, borderWidth: 1.5,
+    borderColor: Colors.borde, backgroundColor: Colors.blanco,
+  },
+  tipoBtnIng:  { backgroundColor: Colors.verde, borderColor: Colors.verde },
+  tipoBtnEgr:  { backgroundColor: Colors.rojo,  borderColor: Colors.rojo  },
+  tipoBtnText: { fontFamily: Fonts.semiBold, fontSize: 14, color: Colors.texto },
+  fieldLabel: { fontFamily: Fonts.medium, fontSize: 13, color: Colors.texto },
+  fechaRow:   { flexDirection: 'row', gap: 10 },
+  fechaBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: Colors.blanco, borderWidth: 1.5, borderColor: Colors.borde,
+    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11,
+  },
+  fechaBtnText: { fontFamily: Fonts.medium, fontSize: 14, color: Colors.texto },
+  fieldInput: {
+    backgroundColor: Colors.blanco, borderWidth: 1.5, borderColor: Colors.borde,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11,
+    fontFamily: Fonts.regular, fontSize: 15, color: Colors.texto,
+  },
+  saveBtn: {
+    backgroundColor: Colors.azul, borderRadius: 14, paddingVertical: 15, alignItems: 'center',
+    marginTop: 4,
+  },
+  saveBtnText: { fontFamily: Fonts.bold, fontSize: 15, color: Colors.blanco, letterSpacing: 0.8 },
 
   // Load more
   loadMoreRow: { paddingVertical: 20, alignItems: 'center' },

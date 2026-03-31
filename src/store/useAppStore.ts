@@ -30,6 +30,10 @@ interface AppStore {
   // ── App state ──────────────────────────────
   isReady: boolean;
   setIsReady: (v: boolean) => void;
+
+  // ── Imagen compartida (share intent) ───────
+  imagenCompartida: string | null;
+  setImagenCompartida: (uri: string | null) => void;
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -96,4 +100,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   // ── App state ──────────────────────────────
   isReady: false,
   setIsReady: (v) => set({ isReady: v }),
+
+  // ── Imagen compartida (share intent) ───────
+  imagenCompartida: null,
+  setImagenCompartida: (uri) => set({ imagenCompartida: uri }),
 }));

@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppStore } from '../store/useAppStore';
-import { getMovimientos, deleteMovimiento } from '../services/db';
+import { getMovimientos, deleteMovimiento, updateMovimiento } from '../services/db';
 import { fechaAmigable } from '../utils/formatters';
 import { Movimiento } from '../types';
 
@@ -104,6 +104,16 @@ export function useHistorial() {
     );
   }
 
+  // ── Actualizar ─────────────────────────────────────────────────────────
+  async function actualizarMovimiento(
+    id: number,
+    data: { tipo: 'ingreso' | 'egreso'; monto: number; descripcion: string | null; cuenta_id: number; categoria_id: number | null; fecha: string }
+  ) {
+    await updateMovimiento(id, data);
+    setMovimientos(prev => prev.map(m => m.id === id ? { ...m, ...data } : m));
+    await refreshCuentas();
+  }
+
   // ── Agrupación por fecha ───────────────────────────────────────────────
   const agrupados = useMemo<Array<[string, Movimiento[]]>>(() => {
     const grupos = new Map<string, Movimiento[]>();
@@ -120,7 +130,7 @@ export function useHistorial() {
     filtro,   setFiltro,
     agrupados, movimientos,
     loading, loadingMore, noHayMas,
-    cargarMas, confirmarEliminar,
+    cargarMas, confirmarEliminar, actualizarMovimiento,
     cuentas, categorias,
   };
 }

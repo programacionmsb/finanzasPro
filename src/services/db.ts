@@ -329,7 +329,7 @@ export async function getMovimientos(
      LEFT JOIN cuentas c ON c.id = m.cuenta_id
      LEFT JOIN categorias cat ON cat.id = m.categoria_id
      WHERE ${where.join(' AND ')}
-     ORDER BY m.fecha DESC
+     ORDER BY m.fecha DESC, m.id DESC
      LIMIT ? OFFSET ?`,
     params
   );
@@ -351,6 +351,24 @@ export async function insertMovimiento(
     ]
   );
   return result.lastInsertRowId;
+}
+
+export async function updateMovimiento(
+  id: number,
+  data: {
+    tipo?: 'ingreso' | 'egreso';
+    monto?: number;
+    descripcion?: string | null;
+    cuenta_id?: number;
+    categoria_id?: number | null;
+    fecha?: string;
+  }
+): Promise<void> {
+  const db = await getDb();
+  const fields = Object.keys(data) as (keyof typeof data)[];
+  const values = fields.map(k => data[k] ?? null);
+  const set = fields.map(f => `${f} = ?`).join(', ');
+  await db.runAsync(`UPDATE movimientos SET ${set} WHERE id = ?`, [...values, id]);
 }
 
 export async function deleteMovimiento(id: number): Promise<void> {

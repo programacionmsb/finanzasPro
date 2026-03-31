@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, AppState, NativeModules, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -20,6 +20,7 @@ import { initDB } from './src/services/db';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { Colors } from './src/constants/Colors';
 import { Fonts } from './src/constants/Fonts';
+import { useAppStore } from './src/store/useAppStore';
 
 export default function App() {
   const [dbReady, setDbReady] = useState(false);
@@ -38,6 +39,32 @@ export default function App() {
     initDB()
       .then(() => setDbReady(true))
       .catch((e) => setDbError(String(e)));
+  }, []);
+
+  // ── Listener de imágenes compartidas (Android share sheet) ──────────────
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const { ReceiveSharingIntent } = NativeModules;
+    if (!ReceiveSharingIntent) return;
+
+    async function checkSharedImage() {
+      try {
+        const fileObject: Record<string, any> = await ReceiveSharingIntent.getFileNames();
+        if (!fileObject) return;
+        const files = Object.values(fileObject);
+        const img = files.find((f: any) => f.contentUri || f.filePath);
+        if (img) {
+          const uri: string = img.contentUri || img.filePath;
+          useAppStore.getState().setImagenCompartida(uri);
+        }
+      } catch {/* sin intent activo */}
+    }
+
+    checkSharedImage();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') checkSharedImage();
+    });
+    return () => sub.remove();
   }, []);
 
   if (!fontsLoaded || !dbReady) {

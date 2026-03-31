@@ -21,6 +21,7 @@ export function useDashboard() {
     movimientosRecientes,
     refreshCuentas,
     refreshMovimientos,
+    refreshCategorias,
   } = useAppStore();
 
   const [resumen, setResumen] = useState<ResumenPeriodo>({
@@ -42,9 +43,10 @@ export function useDashboard() {
       Promise.all([
         refreshCuentas(),
         refreshMovimientos(),
+        refreshCategorias(),
         getResumenPeriodo(usuario.id, desde, hasta),
       ])
-        .then(([, , res]) => {
+        .then(([, , , res]) => {
           if (mounted) setResumen(res);
         })
         .catch((e) => console.error('useDashboard error:', e))

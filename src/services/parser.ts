@@ -1,6 +1,6 @@
 /**
- * parser.ts — Detecta y extrae datos de transacciones desde texto plano.
- * Soporta: Yape, Plin, BCP SMS, Interbank, BBVA.
+ * parser.ts — Detecta y extrae datos de transacciones desde texto OCR.
+ * Soporta: Yape, Plin, BCP, Interbank, BBVA.
  */
 
 import { ParsedTransaction } from '../types';
@@ -8,32 +8,116 @@ import { toSQLiteDate } from '../utils/formatters';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
-/** Extrae monto en soles: "S/ 1,250.50" → 1250.50 */
+/**
+ * Extrae el monto principal en soles.
+ * Acepta: "S/ 1,250.50", "s/50", "S/1.250,50"
+ */
 function parseMonto(texto: string): number | null {
-  const match = texto.match(/S\/\s*([\d,]+\.?\d*)/i);
-  if (!match) return null;
-  return parseFloat(match[1].replace(',', ''));
+  // Busca todos los "S/ número" en el texto
+  const matches = [...texto.matchAll(/[Ss]\s*\/\s*([\d,.]+)/g)];
+  if (matches.length === 0) return null;
+  // Toma el primero (suele ser el monto principal en la pantalla)
+  const raw = matches[0][1].replace(/,/g, '');
+  const n = parseFloat(raw);
+  return isNaN(n) || n <= 0 ? null : n;
 }
 
-/** Convierte fecha DD/MM/YYYY al formato SQLite */
+const MESES: Record<string, string> = {
+  ene: '01', feb: '02', mar: '03', abr: '04', may: '05', jun: '06',
+  jul: '07', ago: '08', sep: '09', oct: '10', nov: '11', dic: '12',
+};
+
+/**
+ * Extrae la hora del texto OCR con rangos válidos (00:00–23:59).
+ * Ej: "07:06 p. m." → "19:06:00"
+ * Usa hora actual si no encuentra ninguna.
+ */
+function parseHora(texto: string): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  // Horas 0-23, minutos 0-59, opcional a.m./p.m.
+  const match = texto.match(/\b([01]?\d|2[0-3]):([0-5]\d)\s*(p\.?\s*m\.?|a\.?\s*m\.?)?(?!\s*\/)/i);
+  if (!match) {
+    const now = new Date();
+    return `${pad(now.getHours())}:${pad(now.getMinutes())}:00`;
+  }
+  let h = parseInt(match[1], 10);
+  const min = match[2];
+  const ampm = (match[3] ?? '').replace(/[\s.]/g, '').toLowerCase();
+  if (ampm === 'pm' && h < 12) h += 12;
+  if (ampm === 'am' && h === 12) h = 0;
+  return `${pad(h)}:${min}:00`;
+}
+
+/**
+ * Convierte fecha a formato SQLite preservando la hora del OCR.
+ * Soporta: DD/MM/YYYY, "30 mar. 2026", DD/MM/YY
+ */
 function parseFecha(texto: string): string {
-  const match = texto.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-  if (!match) return toSQLiteDate(new Date());
-  const [, dd, mm, yyyy] = match;
-  return `${yyyy}-${mm}-${dd} 00:00:00`;
+  const hora = parseHora(texto);
+  // Formato DD/MM/YYYY
+  const m1 = texto.match(/(\d{1,2})\/(\d{2})\/(\d{4})/);
+  if (m1) {
+    const [, dd, mm, yyyy] = m1;
+    return `${yyyy}-${mm}-${dd.padStart(2, '0')} ${hora}`;
+  }
+  // Formato "30 mar. 2026" o "30 mar 2026"
+  const m2 = texto.match(/(\d{1,2})\s+([a-záéíóú]{3})\.?\s+(\d{4})/i);
+  if (m2) {
+    const [, dd, mes, yyyy] = m2;
+    const mm = MESES[mes.toLowerCase()] ?? '01';
+    return `${yyyy}-${mm}-${dd.padStart(2, '0')} ${hora}`;
+  }
+  // Formato DD/MM/YY
+  const m3 = texto.match(/(\d{1,2})\/(\d{2})\/(\d{2})\b/);
+  if (m3) {
+    const [, dd, mm, yy] = m3;
+    return `20${yy}-${mm}-${dd.padStart(2, '0')} ${hora}`;
+  }
+  return toSQLiteDate(new Date());
 }
 
-/** Extrae la línea que sigue a la que contiene "S/" (suele ser el nombre de la persona) */
+/**
+ * Extrae el nombre de la persona involucrada en la transacción.
+ * Prioriza etiquetas explícitas (A:, Para:, De:), luego heurística posicional.
+ */
 function extractPersona(texto: string): string {
+  // Etiquetas explícitas: "A: Juan", "Para: María", "De: Pedro"
+  const labeled = texto.match(/(?:^|\n)\s*(?:[Aa]:|[Pp]ara:|[Dd]e:)\s*(.+)/m);
+  if (labeled) return labeled[1].trim();
+
+  // Heurística: línea inmediatamente después del monto
   const lines = texto.split('\n').map(l => l.trim()).filter(Boolean);
-  const idx = lines.findIndex(l => /S\//.test(l));
+  const idx = lines.findIndex(l => /[Ss]\s*\//.test(l));
   if (idx >= 0 && idx + 1 < lines.length) {
     const next = lines[idx + 1];
-    // Descartar si la siguiente línea es una fecha u operación
-    if (!/\d{2}\/\d{2}\/\d{4}/.test(next) && !/Operaci/i.test(next)) {
+    if (
+      !/\d{1,2}[\/\-]\d{2}[\/\-]\d{2,4}/.test(next) && // no es fecha
+      !/\d{1,2}\s+[a-z]{3}\.?\s+\d{4}/i.test(next) &&  // no es "30 mar. 2026"
+      !/Operaci/i.test(next) &&                           // no es nro operación
+      !/Mensaje/i.test(next) &&                           // no es cabecera de mensaje
+      !/Descripci/i.test(next) &&
+      !/^\d{5,}$/.test(next) &&                          // no es solo número largo
+      next.length >= 2 && next.length < 60
+    ) {
       return next;
     }
   }
+  return '';
+}
+
+/**
+ * Extrae el mensaje/nota escrito por el usuario (campo "Mensaje" en Yape o Plin).
+ */
+function extractMensaje(texto: string): string {
+  // "Mensaje\nTexto" — patrón típico de Yape
+  const m1 = texto.match(/Mensaje\s*\n\s*(.+)/i);
+  if (m1) return m1[1].trim();
+  // "Mensaje: Texto" — variante inline
+  const m2 = texto.match(/Mensaje:\s*(.+)/i);
+  if (m2) return m2[1].trim();
+  // "Descripción: Texto" — Plin / bancos
+  const m3 = texto.match(/Descripci[oó]n[:\s]+(.+)/i);
+  if (m3) return m3[1].trim();
   return '';
 }
 
@@ -41,42 +125,55 @@ function extractPersona(texto: string): string {
 
 /**
  * YAPE
- * Ingreso: "¡Te yaperon!", "te envió"
- * Egreso:  "Yapeo exitoso", "Le enviaste"
+ * Egreso:  "¡Yapeaste!", "Yapeo exitoso", "Le enviaste", "Enviaste a"
+ * Ingreso: "¡Te Yapearon!", "te envió", "te yaparon"
  */
 function parseYape(texto: string): ParsedTransaction | null {
   const upper = texto.toUpperCase();
-  const esIngreso = /TE YAPERON|TE ENVIÓ|YAPARON/.test(upper);
-  const esEgreso  = /YAPEO EXITOSO|LE ENVIASTE|ENVIASTE A/.test(upper);
+  const esIngreso = /TE YAPERON|TE ENVI[OÓ]|YAPARON|TE YAPEARON|TE YAP[EÉ]/.test(upper);
+  const esEgreso  = /YAPEO EXITOSO|LE ENVIASTE|ENVIASTE A|YAPEASTE|[¡!]YAPEASTE/.test(upper);
   if (!esIngreso && !esEgreso) return null;
 
   const monto = parseMonto(texto);
   if (!monto) return null;
 
-  const opMatch = texto.match(/Operaci[oó]n\s*N[°º]?:?\s*(\d+)/i);
   const persona = extractPersona(texto);
+  const mensaje = extractMensaje(texto);
+  const opMatch = texto.match(/(?:Operaci[oó]n\s*N[°º]?:?\s*|Nro\.\s*de\s*operaci[oó]n\s*[\n\r]+\s*)(\d+)/i);
+
+  // Descripción: preferir el mensaje escrito por el usuario
+  let descripcion: string;
+  if (mensaje) {
+    descripcion = persona
+      ? `${mensaje} (${esIngreso ? 'de' : 'a'} ${persona})`
+      : mensaje;
+  } else if (persona) {
+    descripcion = `Yape ${esIngreso ? 'de' : 'a'} ${persona}`;
+  } else {
+    descripcion = `Yape ${esIngreso ? 'recibido' : 'enviado'}`;
+  }
 
   return {
-    tipo:              esIngreso ? 'ingreso' : 'egreso',
+    tipo:             esIngreso ? 'ingreso' : 'egreso',
     monto,
-    descripcion:       persona
-      ? `Yape ${esIngreso ? 'de' : 'a'} ${persona}`
-      : `Yape ${esIngreso ? 'recibido' : 'enviado'}`,
-    origen:            'yape',
-    fecha:             parseFecha(texto),
-    numero_operacion:  opMatch?.[1],
+    descripcion,
+    origen:           'yape',
+    fecha:            parseFecha(texto),
+    numero_operacion: opMatch?.[1],
     persona,
   };
 }
 
 /**
  * PLIN
- * Ingreso: "Recibiste"
+ * Requiere la palabra "PLIN" en el texto.
  * Egreso:  "Enviaste"
- * Banco:   línea "Banco: NOMBRE"
+ * Ingreso: "Recibiste"
  */
 function parsePlin(texto: string): ParsedTransaction | null {
   const upper = texto.toUpperCase();
+  if (!/PLIN/.test(upper)) return null;
+
   const esIngreso = /RECIBISTE/.test(upper);
   const esEgreso  = /ENVIASTE/.test(upper);
   if (!esIngreso && !esEgreso) return null;
@@ -84,16 +181,26 @@ function parsePlin(texto: string): ParsedTransaction | null {
   const monto = parseMonto(texto);
   if (!monto) return null;
 
+  const persona = extractPersona(texto);
+  const mensaje = extractMensaje(texto);
   const bancoMatch = texto.match(/Banco:\s*(.+)/i);
-  const banco      = bancoMatch?.[1]?.trim() ?? '';
-  const persona    = extractPersona(texto);
+  const banco = bancoMatch?.[1]?.trim() ?? '';
+
+  let descripcion: string;
+  if (mensaje) {
+    descripcion = persona
+      ? `${mensaje} (${esIngreso ? 'de' : 'a'} ${persona})`
+      : mensaje;
+  } else if (persona) {
+    descripcion = `Plin ${esIngreso ? 'de' : 'a'} ${persona}`;
+  } else {
+    descripcion = `Plin ${esIngreso ? 'recibido' : 'enviado'}`;
+  }
 
   return {
     tipo:        esIngreso ? 'ingreso' : 'egreso',
     monto,
-    descripcion: persona
-      ? `Plin ${esIngreso ? 'de' : 'a'} ${persona}`
-      : `Plin ${esIngreso ? 'recibido' : 'enviado'}`,
+    descripcion,
     origen:      'plin',
     fecha:       parseFecha(texto),
     persona,
@@ -102,16 +209,18 @@ function parsePlin(texto: string): ParsedTransaction | null {
 }
 
 /**
- * BCP SMS
- * Patrón: "BCP: Retiro|Transferencia|Deposito S/123.00"
+ * BCP — SMS o notificación de app
+ * Ej: "BCP: Transferencia S/500.00"
  */
 function parseBCP(texto: string): ParsedTransaction | null {
-  const match = texto.match(/BCP:\s*(Retiro|Transferencia|Deposito|Pago)\s*S\/\s*([\d.,]+)/i);
+  const match = texto.match(
+    /BCP:\s*(Retiro|Transferencia|Dep[oó]sito|Deposito|Pago|Compra|Cobro)\s*S\/\s*([\d.,]+)/i
+  );
   if (!match) return null;
 
   const operacion = match[1].toLowerCase();
-  const monto     = parseFloat(match[2].replace(',', ''));
-  const esIngreso = operacion === 'deposito';
+  const monto     = parseFloat(match[2].replace(/,/g, ''));
+  const esIngreso = /dep[oó]sito|cobro/.test(operacion);
 
   return {
     tipo:        esIngreso ? 'ingreso' : 'egreso',
@@ -123,42 +232,79 @@ function parseBCP(texto: string): ParsedTransaction | null {
 }
 
 /**
- * INTERBANK
- * Patrón: "Interbank: Pagaste S/ 123.00"
+ * INTERBANK — SMS o app
+ * Ej: "Interbank: Pagaste S/ 123" o "Transferencia enviada/recibida"
  */
 function parseInterbank(texto: string): ParsedTransaction | null {
-  const match = texto.match(/Interbank:\s*Pagaste\s*S\/\s*([\d.,]+)/i);
-  if (!match) return null;
+  const upper = texto.toUpperCase();
+  if (!/INTERBANK/.test(upper)) return null;
 
-  return {
-    tipo:        'egreso',
-    monto:       parseFloat(match[1].replace(',', '')),
-    descripcion: 'Interbank: Pago',
-    origen:      'interbank',
-    fecha:       parseFecha(texto),
-  };
+  // SMS clásico
+  const sms = texto.match(/Interbank:\s*Pagaste\s*S\/\s*([\d.,]+)/i);
+  if (sms) {
+    return {
+      tipo:        'egreso',
+      monto:       parseFloat(sms[1].replace(/,/g, '')),
+      descripcion: 'Interbank: Pago',
+      origen:      'interbank',
+      fecha:       parseFecha(texto),
+    };
+  }
+
+  // App: Transferencia enviada / recibida
+  const trans = texto.match(/Transferencia\s*(enviada|recibida)/i);
+  const monto = parseMonto(texto);
+  if (trans && monto) {
+    const esIngreso = trans[1].toLowerCase() === 'recibida';
+    return {
+      tipo:        esIngreso ? 'ingreso' : 'egreso',
+      monto,
+      descripcion: `Interbank: Transferencia ${trans[1]}`,
+      origen:      'interbank',
+      fecha:       parseFecha(texto),
+    };
+  }
+
+  return null;
 }
 
 /**
- * BBVA
- * Patrón: "BBVA | Transferencia enviada|recibida"
+ * BBVA — app o SMS
+ * Ej: "BBVA | Transferencia enviada S/ 200"
  */
 function parseBBVA(texto: string): ParsedTransaction | null {
-  const match = texto.match(/BBVA\s*\|?\s*Transferencia\s*(enviada|recibida)/i);
-  if (!match) return null;
+  const upper = texto.toUpperCase();
+  if (!/BBVA/.test(upper)) return null;
 
   const monto = parseMonto(texto);
   if (!monto) return null;
 
-  const esIngreso = match[1].toLowerCase() === 'recibida';
+  // Transferencia enviada / recibida
+  const trans = texto.match(/Transferencia\s*(enviada|recibida)/i);
+  if (trans) {
+    const esIngreso = trans[1].toLowerCase() === 'recibida';
+    return {
+      tipo:        esIngreso ? 'ingreso' : 'egreso',
+      monto,
+      descripcion: `BBVA: Transferencia ${trans[1]}`,
+      origen:      'bbva',
+      fecha:       parseFecha(texto),
+    };
+  }
 
-  return {
-    tipo:        esIngreso ? 'ingreso' : 'egreso',
-    monto,
-    descripcion: `BBVA: Transferencia ${match[1]}`,
-    origen:      'bbva',
-    fecha:       parseFecha(texto),
-  };
+  // Pago / Compra / Retiro
+  const pago = texto.match(/\b(Pago|Compra|Retiro|Disposici[oó]n)\b/i);
+  if (pago) {
+    return {
+      tipo:        'egreso',
+      monto,
+      descripcion: `BBVA: ${pago[1]}`,
+      origen:      'bbva',
+      fecha:       parseFecha(texto),
+    };
+  }
+
+  return null;
 }
 
 // ── API pública ──────────────────────────────────────────────────────────

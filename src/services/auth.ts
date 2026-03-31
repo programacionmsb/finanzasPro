@@ -1,39 +1,25 @@
-import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { getDb, getUsuario } from './db';
 import { Usuario } from '../types';
 import { PendingUser } from '../types/navigation';
 
-// Necesario para cerrar el browser después del OAuth
-WebBrowser.maybeCompleteAuthSession();
+// ── Configuración Google Sign-In ──────────────────────────────────────────
+GoogleSignin.configure({
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
+  scopes: ['profile', 'email'],
+});
 
-// ── Configuración Google OAuth ────────────────────────────────────────────
-// Reemplazar con tus Client IDs de Google Cloud Console
-// https://console.cloud.google.com/apis/credentials
-const GOOGLE_CONFIG = {
-  androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? '',
-  iosClientId:     process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '',
-  webClientId:     process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
-};
-
-// ── Hook de Google Sign-In (usar en LoginScreen) ──────────────────────────
-export function useGoogleAuth() {
-  return Google.useAuthRequest(GOOGLE_CONFIG);
-}
-
-// ── Obtener perfil de Google con el access token ──────────────────────────
-export async function fetchGoogleProfile(accessToken: string): Promise<PendingUser> {
-  const res = await fetch('https://www.googleapis.com/userinfo/v2/me', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!res.ok) throw new Error('No se pudo obtener el perfil de Google');
-
-  const data = await res.json();
+// ── Sign-In con Google (nativo) ───────────────────────────────────────────
+export async function signInWithGoogle(): Promise<PendingUser> {
+  await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+  const response = await GoogleSignin.signIn();
+  const user = response.data?.user;
+  if (!user) throw new Error('No se recibió información del usuario');
   return {
-    id:       data.id,
-    nombre:   data.name,
-    email:    data.email,
-    foto_url: data.picture ?? null,
+    id:       user.id,
+    nombre:   user.name ?? '',
+    email:    user.email,
+    foto_url: user.photo ?? null,
     moneda:   'PEN',
   };
 }
@@ -62,3 +48,5 @@ export async function getSessionUser(): Promise<Usuario | null> {
     return null;
   }
 }
+
+export { statusCodes };

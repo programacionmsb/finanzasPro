@@ -25,6 +25,7 @@ export function ManualPanel({ onSaved }: ManualPanelProps) {
   } = useRegistroForm(onSaved);
 
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const montoRef = useRef<TextInput>(null);
 
   return (
@@ -55,11 +56,8 @@ export function ManualPanel({ onSaved }: ManualPanelProps) {
           onPress={() => setTipo('ingreso')}
           activeOpacity={0.8}
         >
-          <Ionicons
-            name="arrow-up-circle"
-            size={20}
-            color={form.tipo === 'ingreso' ? Colors.blanco : Colors.verde}
-          />
+          <Ionicons name="arrow-up-circle" size={20}
+            color={form.tipo === 'ingreso' ? Colors.blanco : Colors.verde} />
           <Text style={[st.tipoBtnText, form.tipo === 'ingreso' && { color: Colors.blanco }]}>
             Ingreso
           </Text>
@@ -70,47 +68,80 @@ export function ManualPanel({ onSaved }: ManualPanelProps) {
           onPress={() => setTipo('egreso')}
           activeOpacity={0.8}
         >
-          <Ionicons
-            name="arrow-down-circle"
-            size={20}
-            color={form.tipo === 'egreso' ? Colors.blanco : Colors.rojo}
-          />
+          <Ionicons name="arrow-down-circle" size={20}
+            color={form.tipo === 'egreso' ? Colors.blanco : Colors.rojo} />
           <Text style={[st.tipoBtnText, form.tipo === 'egreso' && { color: Colors.blanco }]}>
             Egreso
           </Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[st.tipoBtn, form.tipo === 'transferencia' && st.tipoBtnTransfer]}
+          onPress={() => setTipo('transferencia')}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="swap-horizontal" size={20}
+            color={form.tipo === 'transferencia' ? Colors.blanco : Colors.morado} />
+          <Text style={[st.tipoBtnText, form.tipo === 'transferencia' && { color: Colors.blanco }]}>
+            Transferir
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {/* ── Cuenta ─────────────────────────────── */}
+      {/* ── Cuenta origen ──────────────────────── */}
       <CuentaSelector
         cuentas={cuentas}
         value={form.cuentaId}
         onChange={id => setField('cuentaId', id)}
-        label="Cuenta"
+        label={form.tipo === 'transferencia' ? 'Cuenta origen' : 'Cuenta'}
       />
 
-      {/* ── Categoría ──────────────────────────── */}
-      <CategoriaSelector
-        categorias={categoriasFiltradas}
-        tipo={form.tipo}
-        value={form.categoriaId}
-        onChange={setCategoria}
-        advertencia={categoriaReset}
-        label="Categoría"
-      />
+      {/* ── Cuenta destino (solo transferencia) ── */}
+      {form.tipo === 'transferencia' && (
+        <CuentaSelector
+          cuentas={cuentas.filter(c => c.id !== form.cuentaId)}
+          value={form.cuentaDestinoId}
+          onChange={id => setField('cuentaDestinoId', id)}
+          label="Cuenta destino"
+        />
+      )}
 
-      {/* ── Fecha ──────────────────────────────── */}
+      {/* ── Categoría (solo ingreso/egreso) ────── */}
+      {form.tipo !== 'transferencia' && (
+        <CategoriaSelector
+          categorias={categoriasFiltradas}
+          tipo={form.tipo}
+          value={form.categoriaId}
+          onChange={setCategoria}
+          advertencia={categoriaReset}
+          label="Categoría"
+        />
+      )}
+
+      {/* ── Fecha y hora ────────────────────────── */}
       <View>
-        <Text style={st.fieldLabel}>Fecha</Text>
-        <TouchableOpacity
-          style={st.fechaBtn}
-          onPress={() => setShowDatePicker(true)}
-          activeOpacity={0.75}
-        >
-          <Ionicons name="calendar-outline" size={18} color={Colors.celeste} />
-          <Text style={st.fechaText}>{formatFecha(form.fecha.toISOString())}</Text>
-          <Ionicons name="chevron-down" size={16} color={Colors.gris} />
-        </TouchableOpacity>
+        <Text style={st.fieldLabel}>Fecha y hora</Text>
+        <View style={st.fechaRow}>
+          <TouchableOpacity
+            style={[st.fechaBtn, { flex: 2 }]}
+            onPress={() => setShowDatePicker(true)}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="calendar-outline" size={18} color={Colors.celeste} />
+            <Text style={st.fechaText}>{formatFecha(form.fecha.toISOString())}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[st.fechaBtn, { flex: 1 }]}
+            onPress={() => setShowTimePicker(true)}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="time-outline" size={18} color={Colors.celeste} />
+            <Text style={st.fechaText}>
+              {String(form.fecha.getHours()).padStart(2, '0')}:{String(form.fecha.getMinutes()).padStart(2, '0')}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {showDatePicker && (
           <DateTimePicker
@@ -120,7 +151,28 @@ export function ManualPanel({ onSaved }: ManualPanelProps) {
             maximumDate={new Date()}
             onChange={(_, date) => {
               setShowDatePicker(Platform.OS === 'ios');
-              if (date) setField('fecha', date);
+              if (date) {
+                const nueva = new Date(date);
+                nueva.setHours(form.fecha.getHours(), form.fecha.getMinutes(), 0);
+                setField('fecha', nueva);
+              }
+            }}
+          />
+        )}
+
+        {showTimePicker && (
+          <DateTimePicker
+            value={form.fecha}
+            mode="time"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            is24Hour
+            onChange={(_, date) => {
+              setShowTimePicker(Platform.OS === 'ios');
+              if (date) {
+                const nueva = new Date(form.fecha);
+                nueva.setHours(date.getHours(), date.getMinutes(), 0);
+                setField('fecha', nueva);
+              }
             }}
           />
         )}
@@ -180,14 +232,16 @@ const st = StyleSheet.create({
     gap: 8, paddingVertical: 12, borderRadius: 12,
     borderWidth: 1.5, borderColor: Colors.borde, backgroundColor: Colors.blanco,
   },
-  tipoBtnIngreso: { backgroundColor: Colors.verde, borderColor: Colors.verde },
-  tipoBtnEgreso:  { backgroundColor: Colors.rojo,  borderColor: Colors.rojo  },
-  tipoBtnText:    { fontFamily: Fonts.semiBold, fontSize: 15, color: Colors.texto },
+  tipoBtnIngreso: { backgroundColor: Colors.verde,  borderColor: Colors.verde  },
+  tipoBtnEgreso:  { backgroundColor: Colors.rojo,   borderColor: Colors.rojo   },
+  tipoBtnTransfer:{ backgroundColor: Colors.morado, borderColor: Colors.morado },
+  tipoBtnText:    { fontFamily: Fonts.semiBold, fontSize: 13, color: Colors.texto },
 
   // Campos genéricos
   fieldLabel: { fontFamily: Fonts.medium, fontSize: 13, color: Colors.texto, marginBottom: 6 },
 
   // Fecha
+  fechaRow: { flexDirection: 'row', gap: 10 },
   fechaBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: Colors.blanco, borderWidth: 1.5, borderColor: Colors.borde,

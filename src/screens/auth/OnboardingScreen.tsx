@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity,
   TextInput, StyleSheet, Platform, ActivityIndicator, Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackScreenProps } from '@react-navigation/stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -47,6 +48,7 @@ const pb = StyleSheet.create({
 export function OnboardingScreen({ route }: Props) {
   const { usuario } = route.params;
   const { setUsuario } = useAppStore();
+  const { bottom } = useSafeAreaInsets();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [saving, setSaving] = useState(false);
@@ -290,7 +292,7 @@ export function OnboardingScreen({ route }: Props) {
       </ScrollView>
 
       {/* Botones de navegación */}
-      <View style={styles.navButtons}>
+      <View style={[styles.navButtons, { paddingBottom: (Platform.OS === 'ios' ? 36 : 20) + bottom }]}>
         {step > 1 && (
           <TouchableOpacity style={styles.backBtn} onPress={irAtras}>
             <Text style={styles.backBtnText}>← Atrás</Text>
@@ -529,7 +531,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     padding: 20,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 20,
+    paddingBottom: 20,
     backgroundColor: Colors.fondo,
     borderTopWidth: 1,
     borderTopColor: Colors.borde,

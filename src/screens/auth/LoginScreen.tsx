@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, Platform, ActivityIndicator,
@@ -7,7 +7,7 @@ import { StackScreenProps } from '@react-navigation/stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { AuthStackParamList } from '../../types/navigation';
-import { useGoogleAuth, fetchGoogleProfile, buildDemoUser } from '../../services/auth';
+import { signInWithGoogle, buildDemoUser, statusCodes } from '../../services/auth';
 import { Colors } from '../../constants/Colors';
 import { Fonts } from '../../constants/Fonts';
 
@@ -24,33 +24,23 @@ export function LoginScreen({ navigation }: Props) {
   const [loadingDemo,   setLoadingDemo]   = useState(false);
   const [error,         setError]         = useState<string | null>(null);
 
-  const [request, response, promptAsync] = useGoogleAuth();
-
-  // Manejar respuesta de Google OAuth
-  useEffect(() => {
-    if (response?.type === 'success' && response.authentication?.accessToken) {
-      handleGoogleSuccess(response.authentication.accessToken);
-    } else if (response?.type === 'error') {
-      setLoadingGoogle(false);
-      setError('Error al conectar con Google. Intenta de nuevo.');
-    }
-  }, [response]);
-
-  async function handleGoogleSuccess(accessToken: string) {
-    try {
-      const usuario = await fetchGoogleProfile(accessToken);
-      navigation.navigate('Onboarding', { usuario });
-    } catch (e) {
-      setError('No se pudo obtener tu perfil de Google.');
-    } finally {
-      setLoadingGoogle(false);
-    }
-  }
-
   async function handleGooglePress() {
     setError(null);
     setLoadingGoogle(true);
-    await promptAsync();
+    try {
+      const usuario = await signInWithGoogle();
+      navigation.navigate('Onboarding', { usuario });
+    } catch (e: any) {
+      if (e.code === statusCodes.SIGN_IN_CANCELLED) {
+        // usuario canceló
+      } else if (e.code === statusCodes.IN_PROGRESS) {
+        // ya en progreso
+      } else {
+        setError('Error al conectar con Google. Intenta de nuevo.');
+      }
+    } finally {
+      setLoadingGoogle(false);
+    }
   }
 
   function handleDemoPress() {
@@ -101,9 +91,9 @@ export function LoginScreen({ navigation }: Props) {
 
         {/* Botón Google */}
         <TouchableOpacity
-          style={[styles.googleBtn, (!request || loadingGoogle) && styles.btnDisabled]}
+          style={[styles.googleBtn, loadingGoogle && styles.btnDisabled]}
           onPress={handleGooglePress}
-          disabled={!request || loadingGoogle}
+          disabled={loadingGoogle}
           activeOpacity={0.8}
           accessibilityLabel="Continuar con Google"
         >

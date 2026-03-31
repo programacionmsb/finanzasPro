@@ -3,6 +3,7 @@
     "name": "FinanzasPro",
     "slug": "finanzaspro",
     "version": "1.0.0",
+    "scheme": "com.finanzaspro.app",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -19,7 +20,33 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.finanzaspro.app",
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "com.googleusercontent.apps.609918113890-l4m6nbkmavsmpob8ll99s0vqo1aqjcp6"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "SEND",
+          "data": [
+            {
+              "mimeType": "image/*"
+            }
+          ],
+          "category": [
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "ios": {
       "supportsTablet": false,
@@ -33,7 +60,8 @@
       "expo-web-browser",
       "expo-sharing",
       "expo-font",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "@react-native-google-signin/google-signin"
     ],
     "extra": {
       "eas": {

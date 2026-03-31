@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, Image, TouchableOpacity,
   ScrollView, StyleSheet, ActivityIndicator, Alert,
@@ -14,6 +14,7 @@ import { formatMonto } from '../../utils/formatters';
 import { ParsedTransaction } from '../../types';
 import { Colors } from '../../constants/Colors';
 import { Fonts } from '../../constants/Fonts';
+import { useAppStore } from '../../store/useAppStore';
 
 interface FotoPanelProps {
   onSaved: () => void;
@@ -25,10 +26,45 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
     saving, handleSave, categoriasFiltradas, categoriaReset, cuentas,
   } = useRegistroForm(onSaved);
 
+  const { imagenCompartida, setImagenCompartida } = useAppStore();
+
   const [imagenUri,  setImagenUri]  = useState<string | null>(null);
   const [procesando, setProcesando] = useState(false);
   const [detectado,  setDetectado]  = useState<ParsedTransaction | null>(null);
   const [errorOCR,   setErrorOCR]   = useState<string | null>(null);
+
+  // Auto-procesar imagen recibida por share intent
+  useEffect(() => {
+    if (imagenCompartida) {
+      setImagenCompartida(null);
+      processImage(imagenCompartida);
+    }
+  }, [imagenCompartida]);
+
+  async function processImage(uri: string) {
+    setImagenUri(uri);
+    setDetectado(null);
+    setErrorOCR(null);
+    setTipo('ingreso');
+    setProcesando(true);
+    try {
+      const texto = await extractTextFromImage(uri);
+      console.log('[OCR] Texto extraído:\n', texto);
+      const parsed = parseText(texto);
+      if (parsed) {
+        setDetectado(parsed);
+        prefill(parsed);
+        setField('imagenPath', uri);
+        setField('datosOcr', texto);
+      } else {
+        setErrorOCR('Se procesó la imagen pero no se detectó un pago conocido. Puedes completar los datos manualmente.');
+      }
+    } catch (e: any) {
+      setErrorOCR(e.message ?? 'Error al procesar la imagen. Verifica tu conexión y API key.');
+    } finally {
+      setProcesando(false);
+    }
+  }
 
   async function pickImage(source: 'gallery' | 'camera') {
     const perm = source === 'camera'
@@ -41,35 +77,13 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
     }
 
     const result = source === 'camera'
-      ? await ImagePicker.launchCameraAsync({ base64: true, quality: 0.8 })
-      : await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.8, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+      ? await ImagePicker.launchCameraAsync({ quality: 0.8 })
+      : await ImagePicker.launchImageLibraryAsync({ quality: 0.8, mediaTypes: ImagePicker.MediaTypeOptions.Images });
 
     if (result.canceled || !result.assets[0]) return;
 
     const asset = result.assets[0];
-    setImagenUri(asset.uri);
-    setDetectado(null);
-    setErrorOCR(null);
-
-    if (!asset.base64) return;
-
-    setProcesando(true);
-    try {
-      const texto = await extractTextFromImage(asset.base64);
-      const parsed = parseText(texto);
-      if (parsed) {
-        setDetectado(parsed);
-        prefill(parsed);
-        setField('imagenPath', asset.uri);
-        setField('datosOcr', texto);
-      } else {
-        setErrorOCR('Se procesó la imagen pero no se detectó un pago conocido. Puedes completar los datos manualmente.');
-      }
-    } catch (e: any) {
-      setErrorOCR(e.message ?? 'Error al procesar la imagen. Verifica tu conexión y API key.');
-    } finally {
-      setProcesando(false);
-    }
+    await processImage(asset.uri);
   }
 
   return (
@@ -114,11 +128,20 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
       {/* ── Banner detectado ─────────────────── */}
       {detectado && (
         <View style={st.detectadoBanner}>
-          <Text style={st.detectadoLabel}>🔍 Detectado automáticamente</Text>
+          <Text style={st.detectadoLabel}>Detectado: {detectado.origen.toUpperCase()}</Text>
           <Text style={st.detectadoMonto}>
-            {formatMonto(detectado.monto, 'PEN')} · {detectado.origen.toUpperCase()} ·{' '}
-            {detectado.tipo === 'ingreso' ? '↑ Ingreso' : '↓ Egreso'}
+            {detectado.tipo === 'ingreso' ? '↑ ' : '↓ '}
+            {formatMonto(detectado.monto, 'PEN')}
           </Text>
+          {detectado.persona ? (
+            <Text style={st.detectadoSub}>
+              {detectado.tipo === 'ingreso' ? 'De' : 'A'}: {detectado.persona}
+            </Text>
+          ) : null}
+          {detectado.descripcion ? (
+            <Text style={st.detectadoSub} numberOfLines={2}>{detectado.descripcion}</Text>
+          ) : null}
+          <Text style={st.detectadoFecha}>{detectado.fecha.replace('T', ' ')}</Text>
         </View>
       )}
 
@@ -126,29 +149,60 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
       {imagenUri && !procesando && (
         <>
           <View style={st.tipoRow}>
-            {(['ingreso', 'egreso'] as const).map(t => (
-              <TouchableOpacity
-                key={t}
-                style={[st.tipoBtn, form.tipo === t && (t === 'ingreso' ? st.tipoBtnIng : st.tipoBtnEgr)]}
-                onPress={() => setTipo(t)}
-              >
-                <Ionicons
-                  name={t === 'ingreso' ? 'arrow-up-circle' : 'arrow-down-circle'}
-                  size={18}
-                  color={form.tipo === t ? Colors.blanco : t === 'ingreso' ? Colors.verde : Colors.rojo}
-                />
-                <Text style={[st.tipoBtnText, form.tipo === t && { color: Colors.blanco }]}>
-                  {t.charAt(0).toUpperCase() + t.slice(1)}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <TouchableOpacity
+              style={[st.tipoBtn, form.tipo === 'ingreso' && st.tipoBtnIng]}
+              onPress={() => setTipo('ingreso')}
+            >
+              <Ionicons name="arrow-up-circle" size={18}
+                color={form.tipo === 'ingreso' ? Colors.blanco : Colors.verde} />
+              <Text style={[st.tipoBtnText, form.tipo === 'ingreso' && { color: Colors.blanco }]}>
+                Ingreso
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[st.tipoBtn, form.tipo === 'egreso' && st.tipoBtnEgr]}
+              onPress={() => setTipo('egreso')}
+            >
+              <Ionicons name="arrow-down-circle" size={18}
+                color={form.tipo === 'egreso' ? Colors.blanco : Colors.rojo} />
+              <Text style={[st.tipoBtnText, form.tipo === 'egreso' && { color: Colors.blanco }]}>
+                Egreso
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[st.tipoBtn, form.tipo === 'transferencia' && st.tipoBtnTransfer]}
+              onPress={() => setTipo('transferencia')}
+            >
+              <Ionicons name="swap-horizontal" size={18}
+                color={form.tipo === 'transferencia' ? Colors.blanco : Colors.morado} />
+              <Text style={[st.tipoBtnText, form.tipo === 'transferencia' && { color: Colors.blanco }]}>
+                Transferir
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          <CuentaSelector cuentas={cuentas} value={form.cuentaId} onChange={id => setField('cuentaId', id)} />
-          <CategoriaSelector
-            categorias={categoriasFiltradas} tipo={form.tipo}
-            value={form.categoriaId} onChange={setCategoria} advertencia={categoriaReset}
+          <CuentaSelector
+            cuentas={cuentas}
+            value={form.cuentaId}
+            onChange={id => setField('cuentaId', id)}
+            label={form.tipo === 'transferencia' ? 'Cuenta origen' : 'Cuenta'}
           />
+          {form.tipo === 'transferencia' && (
+            <CuentaSelector
+              cuentas={cuentas.filter(c => c.id !== form.cuentaId)}
+              value={form.cuentaDestinoId}
+              onChange={id => setField('cuentaDestinoId', id)}
+              label="Cuenta destino"
+            />
+          )}
+          {form.tipo !== 'transferencia' && (
+            <CategoriaSelector
+              categorias={categoriasFiltradas} tipo={form.tipo}
+              value={form.categoriaId} onChange={setCategoria} advertencia={categoriaReset}
+            />
+          )}
 
           <View>
             <Text style={st.fieldLabel}>Nota (opcional)</Text>
@@ -220,8 +274,10 @@ const st = StyleSheet.create({
     backgroundColor: Colors.verdeLight, borderRadius: 12, padding: 14,
     borderLeftWidth: 4, borderLeftColor: Colors.verde, gap: 4,
   },
-  detectadoLabel:  { fontFamily: Fonts.semiBold, fontSize: 12, color: Colors.gris },
-  detectadoMonto:  { fontFamily: Fonts.bold, fontSize: 18, color: Colors.verde },
+  detectadoLabel:  { fontFamily: Fonts.semiBold, fontSize: 11, color: Colors.gris, textTransform: 'uppercase', letterSpacing: 0.5 },
+  detectadoMonto:  { fontFamily: Fonts.bold, fontSize: 22, color: Colors.verde },
+  detectadoSub:    { fontFamily: Fonts.regular, fontSize: 13, color: Colors.texto },
+  detectadoFecha:  { fontFamily: Fonts.regular, fontSize: 11, color: Colors.gris },
 
   tipoRow: { flexDirection: 'row', gap: 12 },
   tipoBtn: {
@@ -229,9 +285,10 @@ const st = StyleSheet.create({
     paddingVertical: 12, borderRadius: 12, borderWidth: 1.5,
     borderColor: Colors.borde, backgroundColor: Colors.blanco,
   },
-  tipoBtnIng:  { backgroundColor: Colors.verde, borderColor: Colors.verde },
-  tipoBtnEgr:  { backgroundColor: Colors.rojo,  borderColor: Colors.rojo  },
-  tipoBtnText: { fontFamily: Fonts.semiBold, fontSize: 15, color: Colors.texto },
+  tipoBtnIng:      { backgroundColor: Colors.verde,  borderColor: Colors.verde  },
+  tipoBtnEgr:      { backgroundColor: Colors.rojo,   borderColor: Colors.rojo   },
+  tipoBtnTransfer: { backgroundColor: Colors.morado, borderColor: Colors.morado },
+  tipoBtnText: { fontFamily: Fonts.semiBold, fontSize: 13, color: Colors.texto },
 
   fieldLabel: { fontFamily: Fonts.medium, fontSize: 13, color: Colors.texto, marginBottom: 6 },
   notaInput: {
