@@ -63,6 +63,14 @@ function NodoCat({
           )}
         </TouchableOpacity>
 
+        {/* Agregar subcategoría */}
+        <TouchableOpacity
+          style={st.editBtn}
+          onPress={() => nav.navigate('CategoriaForm', { parentId: cat.id, tipo: cat.tipo })}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="add-circle-outline" size={18} color={Colors.verde} />
+        </TouchableOpacity>
         {/* Editar */}
         <TouchableOpacity
           style={st.editBtn}
@@ -86,22 +94,6 @@ function NodoCat({
           {cat.subcategorias!.map(sub => (
             <NodoCat key={sub.id} cat={sub} nivel={nivel + 1} nav={nav} onEliminar={onEliminar} />
           ))}
-          {/* Agregar subcategoría del nivel siguiente si nivel < 3 */}
-          {nivel < 2 && (
-            <TouchableOpacity
-              style={[st.addSubBtn, { paddingLeft: 14 + (nivel + 1) * 18 }]}
-              onPress={() =>
-                nav.navigate('CategoriaForm', {
-                  parentId: cat.id,
-                  tipo: cat.tipo,
-                })
-              }
-              activeOpacity={0.75}
-            >
-              <Ionicons name="add-circle-outline" size={16} color={Colors.gris} />
-              <Text style={st.addSubText}>Agregar subcategoría</Text>
-            </TouchableOpacity>
-          )}
         </View>
       )}
     </View>
@@ -241,13 +233,6 @@ const st = StyleSheet.create({
   nodoNombre:   { flex: 1, fontFamily: Fonts.medium, fontSize: 14, color: Colors.texto },
   editBtn:      { padding: 4 },
   children:     { borderLeftWidth: 2, marginLeft: 32 },
-
-  // Agregar subcategoría
-  addSubBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingVertical: 10, paddingRight: 14,
-  },
-  addSubText: { fontFamily: Fonts.regular, fontSize: 13, color: Colors.gris },
 
   // Nueva categoría
   newCatBtn: {

@@ -45,7 +45,7 @@ export interface Categoria {
 export interface Movimiento {
   id: number;
   usuario_id: string;
-  cuenta_id: number;
+  cuenta_origen_id: number;
   categoria_id: number | null;
   tipo: 'ingreso' | 'egreso' | 'transferencia';
   monto: number;
@@ -65,25 +65,12 @@ export interface Movimiento {
 
 export interface Conciliacion {
   id: number;
-  cuenta_id: number;
+  cuenta_origen_id: number;
   saldo_app: number;
   saldo_real: number;
   diferencia: number;
   estado: 'coincide' | 'diferencia';
   fecha: string;
-}
-
-// Resultado del parser de textos
-export interface ParsedTransaction {
-  tipo: 'ingreso' | 'egreso';
-  monto: number;
-  descripcion: string;
-  origen: 'yape' | 'plin' | 'bcp' | 'interbank' | 'bbva' | 'foto' | 'compartir';
-  fecha: string;
-  numero_operacion?: string;
-  persona?: string;
-  telefono?: string;
-  banco?: string;
 }
 
 // Para el onboarding

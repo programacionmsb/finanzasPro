@@ -101,15 +101,15 @@ export async function sincronizarDesdeFirestore(uid: string): Promise<void> {
       const m = doc.data();
       await db.runAsync(
         `INSERT INTO movimientos
-           (id, usuario_id, cuenta_id, categoria_id, tipo, monto, descripcion, origen,
+           (id, usuario_id, cuenta_origen_id, categoria_id, tipo, monto, descripcion, origen,
             cuenta_destino_id, fecha, imagen_path, datos_ocr, numero_operacion, creado_en)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            monto = excluded.monto, descripcion = excluded.descripcion,
-           categoria_id = excluded.categoria_id, cuenta_id = excluded.cuenta_id,
+           categoria_id = excluded.categoria_id, cuenta_origen_id = excluded.cuenta_origen_id,
            tipo = excluded.tipo, fecha = excluded.fecha,
            numero_operacion = excluded.numero_operacion`,
-        [Number(doc.id), m.usuario_id, m.cuenta_id, m.categoria_id ?? null,
+        [Number(doc.id), m.usuario_id, m.cuenta_origen_id, m.categoria_id ?? null,
          m.tipo, m.monto, m.descripcion ?? null, m.origen,
          m.cuenta_destino_id ?? null, m.fecha, m.imagen_path ?? null,
          m.datos_ocr ?? null, m.numero_operacion ?? '0', m.creado_en]

@@ -127,7 +127,7 @@ export function ConciliacionScreen({ route, navigation }: Props) {
     setGuardando(true);
     try {
       await insertConciliacion({
-        cuenta_id:  cuentaId,
+        cuenta_origen_id:  cuentaId,
         saldo_app:  saldoApp,
         saldo_real: saldoReal,
         diferencia: diff,

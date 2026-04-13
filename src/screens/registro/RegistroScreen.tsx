@@ -17,9 +17,8 @@ type Props = StackScreenProps<AppStackParamList, 'Registro'>;
 type Modo = 'manual' | 'foto' | 'compartir';
 
 const TABS: { key: Modo; label: string; icon: string }[] = [
-  { key: 'compartir', label: 'Compartir',  icon: 'share-social-outline' },
-  { key: 'foto',      label: 'Foto / OCR', icon: 'camera-outline'       },
-  { key: 'manual',    label: 'Manual',     icon: 'create-outline'        },
+  { key: 'foto',   label: 'Foto / OCR', icon: 'camera-outline' },
+  { key: 'manual', label: 'Manual',     icon: 'create-outline'  },
 ];
 
 const TAB_COLOR: Record<Modo, string> = {
@@ -62,9 +61,8 @@ export function RegistroScreen({ navigation, route }: Props) {
 
       {/* ── Panel activo ──────────────────────────── */}
       <View style={st.panel}>
-        {modo === 'manual'    && <ManualPanel  onSaved={handleSaved} />}
-        {modo === 'foto'      && <FotoPanel    onSaved={handleSaved} />}
-        {modo === 'compartir' && <SharePanel   onSaved={handleSaved} />}
+        {modo === 'manual' && <ManualPanel onSaved={handleSaved} />}
+        {modo === 'foto'   && <FotoPanel   onSaved={handleSaved} />}
       </View>
     </SafeAreaView>
   );

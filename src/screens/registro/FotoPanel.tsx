@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, Image, TouchableOpacity,
-  ScrollView, StyleSheet, ActivityIndicator, Alert,
+  ScrollView, StyleSheet, ActivityIndicator, Alert, TextInput,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,9 +9,11 @@ import { CuentaSelector } from '../../components/forms/CuentaSelector';
 import { CategoriaSelector } from '../../components/forms/CategoriaSelector';
 import { useRegistroForm } from '../../hooks/useRegistroForm';
 import { extractTextFromImage } from '../../services/ocr';
-import { parseText } from '../../services/parser';
-import { formatMonto } from '../../utils/formatters';
-import { ParsedTransaction } from '../../types';
+import { OcrTemplate, getTemplates, aplicarTemplate, DatosAplicados } from '../../services/ocrTemplates';
+import { useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { AppStackParamList } from '../../types/navigation';
+import { parseFechaOcr } from '../../utils/formatters';
 import { Colors } from '../../constants/Colors';
 import { Fonts } from '../../constants/Fonts';
 import { useAppStore } from '../../store/useAppStore';
@@ -20,17 +22,22 @@ interface FotoPanelProps {
   onSaved: () => void;
 }
 
+type Estado = 'idle' | 'procesando' | 'eligiendo' | 'formulario';
+
 export function FotoPanel({ onSaved }: FotoPanelProps) {
+  const nav = useNavigation<StackNavigationProp<AppStackParamList>>();
   const {
-    form, setField, setTipo, setCategoria, prefill,
+    form, setField, setTipo, setCategoria,
     saving, handleSave, categoriasFiltradas, categoriaReset, cuentas,
   } = useRegistroForm(onSaved);
 
   const { imagenCompartida, setImagenCompartida } = useAppStore();
 
   const [imagenUri,  setImagenUri]  = useState<string | null>(null);
-  const [procesando, setProcesando] = useState(false);
-  const [detectado,  setDetectado]  = useState<ParsedTransaction | null>(null);
+  const [estado,     setEstado]     = useState<Estado>('idle');
+  const [textoOcr,   setTextoOcr]   = useState<string>('');
+  const [templates,  setTemplates]  = useState<OcrTemplate[]>([]);
+  const [detectado,  setDetectado]  = useState<string | null>(null); // nombre plantilla aplicada
   const [errorOCR,   setErrorOCR]   = useState<string | null>(null);
 
   // Auto-procesar imagen recibida por share intent
@@ -43,27 +50,42 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
 
   async function processImage(uri: string) {
     setImagenUri(uri);
+    setEstado('procesando');
     setDetectado(null);
     setErrorOCR(null);
     setTipo('ingreso');
-    setProcesando(true);
     try {
       const texto = await extractTextFromImage(uri);
       console.log('[OCR] Texto extraído:\n', texto);
-      const parsed = parseText(texto);
-      if (parsed) {
-        setDetectado(parsed);
-        prefill(parsed);
-        setField('imagenPath', uri);
-        setField('datosOcr', texto);
-      } else {
-        setErrorOCR('Se procesó la imagen pero no se detectó un pago conocido. Puedes completar los datos manualmente.');
-      }
+      const tmpl = await getTemplates();
+      setTextoOcr(texto);
+      setTemplates(tmpl);
+      // Siempre mostrar el selector para que el usuario elija
+      setEstado('eligiendo');
     } catch (e: any) {
-      setErrorOCR(e.message ?? 'Error al procesar la imagen. Verifica tu conexión y API key.');
-    } finally {
-      setProcesando(false);
+      setErrorOCR(e.message ?? 'Error al procesar la imagen.');
+      setEstado('idle');
     }
+  }
+
+  function handleElegirPlantilla(template: OcrTemplate) {
+    nav.navigate('OcrMapeo', {
+      textoOcr:   textoOcr,
+      imagenUri:  imagenUri!,
+      templateId: template.id,
+    });
+  }
+
+  function handleConfigurarNueva() {
+    nav.navigate('OcrMapeo', { textoOcr, imagenUri: imagenUri! });
+  }
+
+  function handleSinPlantilla() {
+    setField('imagenPath', imagenUri!);
+    setField('datosOcr',   textoOcr);
+    setField('origen',     'foto');
+    setDetectado(null);
+    setEstado('formulario');
   }
 
   async function pickImage(source: 'gallery' | 'camera') {
@@ -81,9 +103,7 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
       : await ImagePicker.launchImageLibraryAsync({ quality: 0.8, mediaTypes: ImagePicker.MediaTypeOptions.Images });
 
     if (result.canceled || !result.assets[0]) return;
-
-    const asset = result.assets[0];
-    await processImage(asset.uri);
+    await processImage(result.assets[0].uri);
   }
 
   return (
@@ -93,22 +113,24 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
       showsVerticalScrollIndicator={false}
     >
       {/* ── Botones de fuente ─────────────────── */}
-      <View style={st.sourceRow}>
-        <TouchableOpacity style={st.sourceBtn} onPress={() => pickImage('gallery')} activeOpacity={0.8}>
-          <Ionicons name="images-outline" size={22} color={Colors.celeste} />
-          <Text style={st.sourceBtnText}>Galería</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={st.sourceBtn} onPress={() => pickImage('camera')} activeOpacity={0.8}>
-          <Ionicons name="camera-outline" size={22} color={Colors.celeste} />
-          <Text style={st.sourceBtnText}>Cámara</Text>
-        </TouchableOpacity>
-      </View>
+      {(estado === 'idle' || estado === 'procesando') && (
+        <View style={st.sourceRow}>
+          <TouchableOpacity style={st.sourceBtn} onPress={() => pickImage('gallery')} activeOpacity={0.8}>
+            <Ionicons name="images-outline" size={22} color={Colors.celeste} />
+            <Text style={st.sourceBtnText}>Galería</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={st.sourceBtn} onPress={() => pickImage('camera')} activeOpacity={0.8}>
+            <Ionicons name="camera-outline" size={22} color={Colors.celeste} />
+            <Text style={st.sourceBtnText}>Cámara</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
-      {/* ── Imagen seleccionada ───────────────── */}
+      {/* ── Imagen ───────────────────────────── */}
       {imagenUri && (
         <View style={st.imagenWrapper}>
           <Image source={{ uri: imagenUri }} style={st.imagen} resizeMode="cover" />
-          {procesando && (
+          {estado === 'procesando' && (
             <View style={st.procesandoOverlay}>
               <ActivityIndicator size="large" color={Colors.blanco} />
               <Text style={st.procesandoText}>Analizando imagen...</Text>
@@ -117,7 +139,7 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
         </View>
       )}
 
-      {/* ── Error OCR ─────────────────────────── */}
+      {/* ── Error técnico OCR ────────────────── */}
       {errorOCR && (
         <View style={st.errorBox}>
           <Ionicons name="warning-outline" size={16} color={Colors.amarillo} />
@@ -125,29 +147,75 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
         </View>
       )}
 
-      {/* ── Banner detectado ─────────────────── */}
-      {detectado && (
-        <View style={st.detectadoBanner}>
-          <Text style={st.detectadoLabel}>Detectado: {detectado.origen.toUpperCase()}</Text>
-          <Text style={st.detectadoMonto}>
-            {detectado.tipo === 'ingreso' ? '↑ ' : '↓ '}
-            {formatMonto(detectado.monto, 'PEN')}
+      {/* ── Selector de plantilla ────────────── */}
+      {estado === 'eligiendo' && (
+        <View style={st.selectorBox}>
+          <Text style={st.selectorTitle}>¿Con qué plantilla procesamos?</Text>
+          <Text style={st.selectorSub}>
+            Elige la plantilla que corresponde a esta imagen para extraer los datos automáticamente.
           </Text>
-          {detectado.persona ? (
-            <Text style={st.detectadoSub}>
-              {detectado.tipo === 'ingreso' ? 'De' : 'A'}: {detectado.persona}
-            </Text>
-          ) : null}
-          {detectado.descripcion ? (
-            <Text style={st.detectadoSub} numberOfLines={2}>{detectado.descripcion}</Text>
-          ) : null}
-          <Text style={st.detectadoFecha}>{detectado.fecha.replace('T', ' ')}</Text>
+
+          {templates.length === 0 ? (
+            <View style={st.sinPlantillas}>
+              <Ionicons name="albums-outline" size={32} color={Colors.gris} />
+              <Text style={st.sinPlantillasText}>No tienes plantillas guardadas aún</Text>
+            </View>
+          ) : (
+            <View style={st.templateList}>
+              {templates.map(t => (
+                <TouchableOpacity
+                  key={t.id}
+                  style={st.templateCard}
+                  onPress={() => handleElegirPlantilla(t)}
+                  activeOpacity={0.75}
+                >
+                  <View style={st.templateCardLeft}>
+                    <Ionicons name="scan-outline" size={20} color={Colors.celeste} />
+                    <View>
+                      <Text style={st.templateNombre}>{t.nombre}</Text>
+                      <Text style={st.templateMeta}>
+                        {t.mapeo.length} campo{t.mapeo.length !== 1 ? 's' : ''}
+                        {t.palabrasClave.length > 0 ? ` · ${t.palabrasClave.slice(0, 2).join(', ')}` : ''}
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={Colors.gris} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Acciones secundarias */}
+          <View style={st.selectorAcciones}>
+            <TouchableOpacity style={st.accionBtn} onPress={handleSinPlantilla} activeOpacity={0.75}>
+              <Ionicons name="create-outline" size={16} color={Colors.gris} />
+              <Text style={st.accionBtnText}>Ingresar manualmente</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[st.accionBtn, st.accionBtnPrimary]} onPress={handleConfigurarNueva} activeOpacity={0.75}>
+              <Ionicons name="add-circle-outline" size={16} color={Colors.celeste} />
+              <Text style={[st.accionBtnText, { color: Colors.celeste }]}>Crear nueva plantilla</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
-      {/* ── Formulario (si hay imagen) ────────── */}
-      {imagenUri && !procesando && (
+      {/* ── Banner plantilla aplicada ────────── */}
+      {estado === 'formulario' && detectado && (
+        <View style={st.detectadoBanner}>
+          <Ionicons name="checkmark-circle-outline" size={18} color={Colors.verde} />
+          <Text style={st.detectadoLabel}>Plantilla aplicada: <Text style={st.detectadoNombre}>{detectado}</Text></Text>
+        </View>
+      )}
+
+      {/* ── Formulario ────────────────────────── */}
+      {estado === 'formulario' && (
         <>
+          {/* Botón cambiar plantilla */}
+          <TouchableOpacity style={st.cambiarBtn} onPress={() => setEstado('eligiendo')} activeOpacity={0.75}>
+            <Ionicons name="refresh-outline" size={14} color={Colors.celeste} />
+            <Text style={st.cambiarBtnText}>Cambiar plantilla</Text>
+          </TouchableOpacity>
+
           <View style={st.tipoRow}>
             <TouchableOpacity
               style={[st.tipoBtn, form.tipo === 'ingreso' && st.tipoBtnIng]}
@@ -182,6 +250,15 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
               </Text>
             </TouchableOpacity>
           </View>
+
+          {form.tipo === 'transferencia' && (
+            <CuentaSelector
+              cuentas={cuentas.filter(c => c.id !== form.cuentaId)}
+              value={form.cuentaDestinoId}
+              onChange={id => setField('cuentaDestinoId', id)}
+              label="Cuenta destino"
+            />
+          )}
 
           <CuentaSelector
             cuentas={cuentas}
@@ -228,7 +305,7 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
       )}
 
       {/* Placeholder inicial */}
-      {!imagenUri && (
+      {estado === 'idle' && !errorOCR && (
         <View style={st.placeholder}>
           <Text style={st.placeholderEmoji}>📷</Text>
           <Text style={st.placeholderText}>
@@ -241,9 +318,6 @@ export function FotoPanel({ onSaved }: FotoPanelProps) {
     </ScrollView>
   );
 }
-
-// Necesario para el campo de nota dentro del panel
-import { TextInput } from 'react-native';
 
 const st = StyleSheet.create({
   content: { padding: 20, gap: 16 },
@@ -270,14 +344,51 @@ const st = StyleSheet.create({
   },
   errorText: { flex: 1, fontFamily: Fonts.regular, fontSize: 13, color: Colors.texto },
 
-  detectadoBanner: {
-    backgroundColor: Colors.verdeLight, borderRadius: 12, padding: 14,
-    borderLeftWidth: 4, borderLeftColor: Colors.verde, gap: 4,
+  // Selector de plantilla
+  selectorBox: {
+    backgroundColor: Colors.blanco, borderRadius: 16,
+    padding: 16, gap: 14, borderWidth: 1.5, borderColor: Colors.borde,
   },
-  detectadoLabel:  { fontFamily: Fonts.semiBold, fontSize: 11, color: Colors.gris, textTransform: 'uppercase', letterSpacing: 0.5 },
-  detectadoMonto:  { fontFamily: Fonts.bold, fontSize: 22, color: Colors.verde },
-  detectadoSub:    { fontFamily: Fonts.regular, fontSize: 13, color: Colors.texto },
-  detectadoFecha:  { fontFamily: Fonts.regular, fontSize: 11, color: Colors.gris },
+  selectorTitle: { fontFamily: Fonts.bold, fontSize: 16, color: Colors.texto },
+  selectorSub:   { fontFamily: Fonts.regular, fontSize: 13, color: Colors.gris, lineHeight: 18, marginTop: -8 },
+
+  sinPlantillas: { alignItems: 'center', gap: 8, paddingVertical: 16 },
+  sinPlantillasText: { fontFamily: Fonts.regular, fontSize: 14, color: Colors.gris, textAlign: 'center' },
+
+  templateList: { gap: 8 },
+  templateCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: Colors.fondo, borderRadius: 12, padding: 14,
+    borderWidth: 1.5, borderColor: Colors.borde,
+  },
+  templateCardLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  templateNombre:   { fontFamily: Fonts.semiBold, fontSize: 14, color: Colors.texto },
+  templateMeta:     { fontFamily: Fonts.regular, fontSize: 11, color: Colors.gris, marginTop: 2 },
+
+  selectorAcciones: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  accionBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 11, borderRadius: 10, borderWidth: 1.5, borderColor: Colors.borde,
+  },
+  accionBtnPrimary: { borderColor: Colors.celeste, backgroundColor: Colors.celesteLight },
+  accionBtnText:    { fontFamily: Fonts.medium, fontSize: 12, color: Colors.gris },
+
+  // Formulario
+  detectadoBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: Colors.verdeLight, borderRadius: 12, padding: 12,
+    borderLeftWidth: 4, borderLeftColor: Colors.verde,
+  },
+  detectadoLabel:  { fontFamily: Fonts.regular, fontSize: 13, color: Colors.texto, flex: 1 },
+  detectadoNombre: { fontFamily: Fonts.semiBold, color: Colors.texto },
+
+  cambiarBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    alignSelf: 'flex-start', marginTop: -4,
+    paddingHorizontal: 12, paddingVertical: 6,
+    backgroundColor: Colors.celesteLight, borderRadius: 8,
+  },
+  cambiarBtnText: { fontFamily: Fonts.medium, fontSize: 12, color: Colors.celeste },
 
   tipoRow: { flexDirection: 'row', gap: 12 },
   tipoBtn: {

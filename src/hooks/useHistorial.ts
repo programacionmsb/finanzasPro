@@ -109,7 +109,17 @@ export function useHistorial() {
   // ── Actualizar ─────────────────────────────────────────────────────────
   async function actualizarMovimiento(
     id: number,
-    data: { tipo: 'ingreso' | 'egreso'; monto: number; descripcion: string | null; cuenta_id: number; categoria_id: number | null; fecha: string }
+    data: {
+      tipo: 'ingreso' | 'egreso' | 'transferencia';
+      monto: number;
+      descripcion: string | null;
+      cuenta_origen_id: number;
+      cuenta_destino_id?: number | null;
+      categoria_id: number | null;
+      fecha: string;
+      origen?: Movimiento['origen'];
+      numero_operacion?: string;
+    }
   ) {
     await updateMovimiento(id, data);
     setMovimientos(prev => prev.map(m => m.id === id ? { ...m, ...data } : m));

@@ -6,6 +6,8 @@ import { AjustesScreen }        from '../screens/ajustes/AjustesScreen';
 import { ConciliacionScreen }   from '../screens/cuentas/ConciliacionScreen';
 import { CuentaFormScreen }     from '../screens/cuentas/CuentaFormScreen';
 import { CategoriaFormScreen }  from '../screens/categorias/CategoriaFormScreen';
+import { OcrMapeoScreen }       from '../screens/registro/OcrMapeoScreen';
+import { OcrPlantillasScreen }  from '../screens/ajustes/OcrPlantillasScreen';
 import { AppStackParamList }    from '../types/navigation';
 import { Colors } from '../constants/Colors';
 import { Fonts }  from '../constants/Fonts';
@@ -71,6 +73,18 @@ export function AppNavigator() {
         name="CategoriaForm"
         component={CategoriaFormScreen}
         options={{ title: 'Categoría' }}
+      />
+
+      <Stack.Screen
+        name="OcrMapeo"
+        component={OcrMapeoScreen}
+        options={{ title: 'Configurar imagen' }}
+      />
+
+      <Stack.Screen
+        name="OcrPlantillas"
+        component={OcrPlantillasScreen}
+        options={{ title: 'Plantillas OCR' }}
       />
     </Stack.Navigator>
   );

@@ -265,7 +265,7 @@ export function ReportesScreen() {
               <View style={st.card}>
                 <View style={st.progresosGap}>
                   {estadCuentas.map(ec => {
-                    const cuenta = cuentas.find(c => c.id === ec.cuenta_id);
+                    const cuenta = cuentas.find(c => c.id === ec.cuenta_origen_id);
                     if (!cuenta) return null;
                     const total = ec.ingresos + ec.egresos;
                     const maxTotal = Math.max(
@@ -274,7 +274,7 @@ export function ReportesScreen() {
                     );
                     return (
                       <ProgresoItem
-                        key={ec.cuenta_id}
+                        key={ec.cuenta_origen_id}
                         label={`${cuenta.icono} ${cuenta.nombre}`}
                         valor={total}
                         total={maxTotal}

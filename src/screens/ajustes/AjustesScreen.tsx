@@ -258,6 +258,19 @@ export function AjustesScreen() {
         </View>
       </View>
 
+      {/* ── OCR ──────────────────────────────────── */}
+      <View style={st.section}>
+        <Text style={st.sectionTitle}>OCR / IMÁGENES</Text>
+        <View style={st.card}>
+          <SettingRow
+            icon="scan-outline"
+            label="Plantillas OCR"
+            value="Imágenes configuradas"
+            onPress={() => nav.navigate('OcrPlantillas')}
+          />
+        </View>
+      </View>
+
       {/* ── Acerca de ────────────────────────────── */}
       <View style={st.section}>
         <Text style={st.sectionTitle}>ACERCA DE</Text>

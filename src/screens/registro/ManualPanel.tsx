@@ -9,9 +9,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { CuentaSelector } from '../../components/forms/CuentaSelector';
 import { CategoriaSelector } from '../../components/forms/CategoriaSelector';
 import { useRegistroForm } from '../../hooks/useRegistroForm';
-import { formatFecha } from '../../utils/formatters';
+import { formatFecha, toSQLiteDate } from '../../utils/formatters';
 import { Colors } from '../../constants/Colors';
 import { Fonts } from '../../constants/Fonts';
+
+const ORIGENES = [
+  { key: 'manual',    label: 'Manual',    color: Colors.gris      },
+  { key: 'yape',      label: 'Yape',      color: Colors.morado    },
+  { key: 'plin',      label: 'Plin',      color: '#00AEEF'        },
+  { key: 'bcp',       label: 'BCP',       color: Colors.bcp       },
+  { key: 'interbank', label: 'Interbank', color: Colors.interbank },
+  { key: 'bbva',      label: 'BBVA',      color: Colors.bbva      },
+];
 
 interface ManualPanelProps {
   onSaved: () => void;
@@ -128,7 +137,7 @@ export function ManualPanel({ onSaved }: ManualPanelProps) {
             activeOpacity={0.75}
           >
             <Ionicons name="calendar-outline" size={18} color={Colors.celeste} />
-            <Text style={st.fechaText}>{formatFecha(form.fecha.toISOString())}</Text>
+            <Text style={st.fechaText}>{formatFecha(toSQLiteDate(form.fecha))}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -176,6 +185,37 @@ export function ManualPanel({ onSaved }: ManualPanelProps) {
             }}
           />
         )}
+      </View>
+
+      {/* ── Origen ─────────────────────────────── */}
+      <View>
+        <Text style={st.fieldLabel}>Origen</Text>
+        <View style={st.origenRow}>
+          {ORIGENES.map(o => (
+            <TouchableOpacity
+              key={o.key}
+              style={[st.origenChip, form.origen === o.key && { backgroundColor: o.color, borderColor: o.color }]}
+              onPress={() => setField('origen', o.key as typeof form.origen)}
+              activeOpacity={0.75}
+            >
+              <Text style={[st.origenChipText, form.origen === o.key && { color: Colors.blanco }]}>
+                {o.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      {/* ── Nro. Operación ──────────────────────── */}
+      <View>
+        <Text style={st.fieldLabel}>Nro. Operación (opcional)</Text>
+        <TextInput
+          style={st.fieldInput}
+          placeholder="Número de operación o referencia"
+          placeholderTextColor={Colors.gris}
+          value={form.numeroOperacion === '0' ? '' : form.numeroOperacion}
+          onChangeText={v => setField('numeroOperacion', v || '0')}
+        />
       </View>
 
       {/* ── Nota ───────────────────────────────── */}
@@ -248,6 +288,22 @@ const st = StyleSheet.create({
     borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13,
   },
   fechaText: { flex: 1, fontFamily: Fonts.medium, fontSize: 15, color: Colors.texto },
+
+  // Origen chips
+  origenRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  origenChip: {
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: 20, borderWidth: 1.5, borderColor: Colors.borde,
+    backgroundColor: Colors.blanco,
+  },
+  origenChipText: { fontFamily: Fonts.medium, fontSize: 13, color: Colors.texto },
+
+  // Nro. operación
+  fieldInput: {
+    backgroundColor: Colors.blanco, borderWidth: 1.5, borderColor: Colors.borde,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13,
+    fontFamily: Fonts.regular, fontSize: 15, color: Colors.texto,
+  },
 
   // Nota
   notaInput: {

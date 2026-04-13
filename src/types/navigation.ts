@@ -36,6 +36,8 @@ export type AppStackParamList = {
   Conciliacion:   { cuentaId: number };
   CategoriaForm:  { categoriaId?: number; parentId?: number; tipo?: 'ingreso' | 'egreso' };
   CuentaForm:     undefined;
+  OcrMapeo:       { textoOcr: string; imagenUri: string; templateId?: string };
+  OcrPlantillas:  undefined;
 };
 
 // ── Root ──────────────────────────────────────

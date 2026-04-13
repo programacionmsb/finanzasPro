@@ -3,7 +3,7 @@ import { Alert } from 'react-native';
 import { useAppStore } from '../store/useAppStore';
 import { insertMovimiento, getDb } from '../services/db';
 import { subirMovimiento } from '../services/firestore';
-import { Movimiento, ParsedTransaction } from '../types';
+import { Movimiento } from '../types';
 import { toSQLiteDate } from '../utils/formatters';
 
 export type TipoMovimiento = 'ingreso' | 'egreso' | 'transferencia';
@@ -91,28 +91,6 @@ export function useRegistroForm(onSaved?: () => void) {
     setForm(f => ({ ...f, [key]: value }));
   }, []);
 
-  /** Pre-carga el formulario con datos parseados (OCR o texto compartido) */
-  const prefill = useCallback((parsed: ParsedTransaction) => {
-    // Yape (ingreso o egreso) → pre-seleccionar cuenta BCP automáticamente
-    let cuentaIdAuto: number | null = null;
-    if (parsed.origen === 'yape') {
-      const bcp = cuentas.find(c => /bcp/i.test(c.nombre));
-      if (bcp) cuentaIdAuto = bcp.id;
-    }
-
-    setForm(f => ({
-      ...f,
-      tipo:             parsed.tipo,
-      monto:            String(parsed.monto),
-      descripcion:      parsed.descripcion,
-      origen:           parsed.origen,
-      fecha:            new Date(parsed.fecha.replace(' ', 'T')),
-      numeroOperacion:  parsed.numero_operacion ?? '0',
-      ...(cuentaIdAuto !== null && { cuentaId: cuentaIdAuto }),
-    }));
-    setCatReset(false);
-  }, [cuentas]);
-
   const resetForm = useCallback(() => {
     setForm(INITIAL);
     setCatReset(false);
@@ -139,7 +117,7 @@ export function useRegistroForm(onSaved?: () => void) {
     try {
       await insertMovimiento({
         usuario_id:        usuario.id,
-        cuenta_id:         form.cuentaId,
+        cuenta_origen_id:  form.cuentaId,
         categoria_id:      form.tipo === 'transferencia' ? null : form.categoriaId,
         tipo:              form.tipo,
         monto,
@@ -171,7 +149,7 @@ export function useRegistroForm(onSaved?: () => void) {
   }, [form, usuario, onSaved]);
 
   return {
-    form, setField, setTipo, setCategoria, prefill, resetForm,
+    form, setField, setTipo, setCategoria, resetForm,
     saving, handleSave, categoriasFiltradas, categoriaReset,
     cuentas, categorias,
   };

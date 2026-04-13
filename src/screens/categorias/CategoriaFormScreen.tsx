@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { StackScreenProps } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
+import EmojiPicker from 'rn-emoji-keyboard';
 import { useAppStore } from '../../store/useAppStore';
 import { insertCategoria, updateCategoria } from '../../services/db';
 import { AppStackParamList } from '../../types/navigation';
@@ -21,12 +22,6 @@ const COLORES = [
   '#7B3FE4', '#E91E63', '#795548', '#607D8B', '#7A8B9A',
 ];
 
-const ICONOS = [
-  '🍔','🚗','🏠','🏥','🎮','📦','📚','💼','💸','🎁',
-  '✈️','⚽','🎵','🍕','☕','🛒','💊','🔧','📱','💡',
-  '🏦','💰','🎓','🌿','🐾','🏋️','🎨','🌮','🍜','🚀',
-];
-
 // ── Componente ────────────────────────────────────────────────────────────
 
 export function CategoriaFormScreen({ navigation, route }: Props) {
@@ -34,11 +29,12 @@ export function CategoriaFormScreen({ navigation, route }: Props) {
   const { usuario, categorias, refreshCategorias } = useAppStore();
 
   // ── Estado del formulario ─────────────────────────────────────────────
-  const [nombre,  setNombre]  = useState('');
-  const [icono,   setIcono]   = useState('📦');
-  const [color,   setColor]   = useState<string>(Colors.celeste);
-  const [tipo,    setTipo]    = useState<'ingreso' | 'egreso'>(tipoParam ?? 'egreso');
-  const [saving,  setSaving]  = useState(false);
+  const [nombre,       setNombre]       = useState('');
+  const [icono,        setIcono]        = useState('📦');
+  const [color,        setColor]        = useState<string>(Colors.celeste);
+  const [tipo,         setTipo]         = useState<'ingreso' | 'egreso'>(tipoParam ?? 'egreso');
+  const [saving,       setSaving]       = useState(false);
+  const [pickerVisible, setPickerVisible] = useState(false);
 
   // Buscar categoría padre (si aplica)
   const parent = parentId ? categorias.find(c => c.id === parentId) : null;
@@ -145,19 +141,33 @@ export function CategoriaFormScreen({ navigation, route }: Props) {
       {/* ── Ícono ────────────────────────────────── */}
       <View>
         <Text style={st.label}>Ícono</Text>
-        <View style={st.grid}>
-          {ICONOS.map(e => (
-            <TouchableOpacity
-              key={e}
-              style={[st.emojiCell, icono === e && { backgroundColor: Colors.celesteLight, borderColor: Colors.celeste }]}
-              onPress={() => setIcono(e)}
-              activeOpacity={0.75}
-            >
-              <Text style={st.emoji}>{e}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <TouchableOpacity style={st.iconoPicker} onPress={() => setPickerVisible(true)} activeOpacity={0.8}>
+          <Text style={st.iconoActual}>{icono}</Text>
+          <Text style={st.iconoPickerText}>Cambiar ícono</Text>
+          <Ionicons name="chevron-forward" size={16} color={Colors.gris} />
+        </TouchableOpacity>
       </View>
+
+      <EmojiPicker
+        onEmojiSelected={e => { setIcono(e.emoji); setPickerVisible(false); }}
+        open={pickerVisible}
+        onClose={() => setPickerVisible(false)}
+        enableSearchBar
+        enableRecentlyUsed
+        theme={{
+          backdrop: '#00000088',
+          knob: Colors.celeste,
+          container: Colors.blanco,
+          header: Colors.texto,
+          skinTonesContainer: Colors.fondo,
+          category: {
+            icon: Colors.gris,
+            iconActive: Colors.celeste,
+            container: Colors.blanco,
+            containerActive: Colors.celesteLight,
+          },
+        }}
+      />
 
       {/* ── Color ────────────────────────────────── */}
       <View>
@@ -233,13 +243,14 @@ const st = StyleSheet.create({
     fontFamily: Fonts.regular, fontSize: 16, color: Colors.texto,
   },
 
-  // Emoji grid
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  emojiCell: {
-    width: 44, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+  // Icono picker
+  iconoPicker: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
     backgroundColor: Colors.blanco, borderWidth: 1.5, borderColor: Colors.borde,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
   },
-  emoji: { fontSize: 22 },
+  iconoActual:    { fontSize: 28 },
+  iconoPickerText:{ flex: 1, fontFamily: Fonts.medium, fontSize: 15, color: Colors.texto },
 
   // Color row
   colorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },

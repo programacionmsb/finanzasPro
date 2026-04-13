@@ -69,7 +69,7 @@ export async function initDB(): Promise<void> {
     CREATE TABLE IF NOT EXISTS movimientos (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
       usuario_id        TEXT NOT NULL,
-      cuenta_id         INTEGER NOT NULL,
+      cuenta_origen_id  INTEGER NOT NULL,
       categoria_id      INTEGER,
       tipo              TEXT NOT NULL CHECK(tipo IN ('ingreso','egreso','transferencia')),
       monto             REAL NOT NULL,
@@ -82,7 +82,7 @@ export async function initDB(): Promise<void> {
       numero_operacion  TEXT DEFAULT '0',
       creado_en         DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
-      FOREIGN KEY (cuenta_id) REFERENCES cuentas(id),
+      FOREIGN KEY (cuenta_origen_id) REFERENCES cuentas(id),
       FOREIGN KEY (categoria_id) REFERENCES categorias(id)
     );
 
@@ -95,16 +95,24 @@ export async function initDB(): Promise<void> {
 
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS conciliaciones (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      cuenta_id  INTEGER NOT NULL,
-      saldo_app  REAL NOT NULL,
-      saldo_real REAL NOT NULL,
-      diferencia REAL NOT NULL,
-      estado     TEXT NOT NULL CHECK(estado IN ('coincide','diferencia')),
-      fecha      DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (cuenta_id) REFERENCES cuentas(id)
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      cuenta_origen_id INTEGER NOT NULL,
+      saldo_app        REAL NOT NULL,
+      saldo_real       REAL NOT NULL,
+      diferencia       REAL NOT NULL,
+      estado           TEXT NOT NULL CHECK(estado IN ('coincide','diferencia')),
+      fecha            DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (cuenta_origen_id) REFERENCES cuentas(id)
     );
   `);
+
+  // Migración: renombrar cuenta_id → cuenta_origen_id en tablas existentes
+  try {
+    await db.execAsync(`ALTER TABLE movimientos RENAME COLUMN cuenta_id TO cuenta_origen_id`);
+  } catch { /* columna ya renombrada */ }
+  try {
+    await db.execAsync(`ALTER TABLE conciliaciones RENAME COLUMN cuenta_id TO cuenta_origen_id`);
+  } catch { /* columna ya renombrada */ }
 }
 
 // ──────────────────────────────────────────────
@@ -179,7 +187,7 @@ export async function deleteCuenta(id: number): Promise<void> {
 export async function contarMovimientosCuenta(cuentaId: number): Promise<number> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ total: number }>(
-    'SELECT COUNT(*) as total FROM movimientos WHERE cuenta_id = ? OR cuenta_destino_id = ?',
+    'SELECT COUNT(*) as total FROM movimientos WHERE cuenta_origen_id = ? OR cuenta_destino_id = ?',
     [cuentaId, cuentaId]
   );
   return row?.total ?? 0;
@@ -187,7 +195,7 @@ export async function contarMovimientosCuenta(cuentaId: number): Promise<number>
 
 export async function eliminarCuentaDefinitivo(cuentaId: number): Promise<void> {
   const db = await getDb();
-  await db.runAsync('DELETE FROM movimientos WHERE cuenta_id = ? OR cuenta_destino_id = ?', [cuentaId, cuentaId]);
+  await db.runAsync('DELETE FROM movimientos WHERE cuenta_origen_id = ? OR cuenta_destino_id = ?', [cuentaId, cuentaId]);
   await db.runAsync('DELETE FROM cuentas WHERE id = ?', [cuentaId]);
 }
 
@@ -228,12 +236,12 @@ export async function calcularSaldo(cuentaId: number): Promise<number> {
 
   const ingresos = await db.getFirstAsync<{ total: number }>(
     `SELECT COALESCE(SUM(monto), 0) as total FROM movimientos
-     WHERE cuenta_id = ? AND tipo = 'ingreso'`, [cuentaId]
+     WHERE cuenta_origen_id = ? AND tipo = 'ingreso'`, [cuentaId]
   );
 
   const egresos = await db.getFirstAsync<{ total: number }>(
     `SELECT COALESCE(SUM(monto), 0) as total FROM movimientos
-     WHERE cuenta_id = ? AND tipo = 'egreso'`, [cuentaId]
+     WHERE cuenta_origen_id = ? AND tipo = 'egreso'`, [cuentaId]
   );
 
   const transRecibidas = await db.getFirstAsync<{ total: number }>(
@@ -243,7 +251,7 @@ export async function calcularSaldo(cuentaId: number): Promise<number> {
 
   const transEnviadas = await db.getFirstAsync<{ total: number }>(
     `SELECT COALESCE(SUM(monto), 0) as total FROM movimientos
-     WHERE cuenta_id = ? AND tipo = 'transferencia'`, [cuentaId]
+     WHERE cuenta_origen_id = ? AND tipo = 'transferencia'`, [cuentaId]
   );
 
   return (
@@ -399,7 +407,7 @@ export async function getMovimientos(
   const params: (string | number)[] = [usuarioId];
 
   if (cuentaId !== undefined) {
-    where.push('m.cuenta_id = ?');
+    where.push('m.cuenta_origen_id = ?');
     params.push(cuentaId);
   }
   if (tipo) {
@@ -423,7 +431,7 @@ export async function getMovimientos(
             c.nombre AS cuenta_nombre,
             cat.nombre AS categoria_nombre
      FROM movimientos m
-     LEFT JOIN cuentas c ON c.id = m.cuenta_id
+     LEFT JOIN cuentas c ON c.id = m.cuenta_origen_id
      LEFT JOIN categorias cat ON cat.id = m.categoria_id
      WHERE ${where.join(' AND ')}
      ORDER BY m.fecha DESC, m.id DESC
@@ -438,11 +446,11 @@ export async function insertMovimiento(
   const db = await getDb();
   const result = await db.runAsync(
     `INSERT INTO movimientos
-       (usuario_id, cuenta_id, categoria_id, tipo, monto, descripcion, origen,
+       (usuario_id, cuenta_origen_id, categoria_id, tipo, monto, descripcion, origen,
         cuenta_destino_id, fecha, imagen_path, datos_ocr, numero_operacion)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      mov.usuario_id, mov.cuenta_id, mov.categoria_id ?? null, mov.tipo, mov.monto,
+      mov.usuario_id, mov.cuenta_origen_id, mov.categoria_id ?? null, mov.tipo, mov.monto,
       mov.descripcion ?? null, mov.origen, mov.cuenta_destino_id ?? null,
       mov.fecha, mov.imagen_path ?? null, mov.datos_ocr ?? null,
       mov.numero_operacion ?? '0',
@@ -454,12 +462,15 @@ export async function insertMovimiento(
 export async function updateMovimiento(
   id: number,
   data: {
-    tipo?: 'ingreso' | 'egreso';
-    monto?: number;
-    descripcion?: string | null;
-    cuenta_id?: number;
-    categoria_id?: number | null;
-    fecha?: string;
+    tipo?:              'ingreso' | 'egreso' | 'transferencia';
+    monto?:             number;
+    descripcion?:       string | null;
+    cuenta_origen_id?:  number;
+    cuenta_destino_id?: number | null;
+    categoria_id?:      number | null;
+    fecha?:             string;
+    origen?:            string;
+    numero_operacion?:  string;
   }
 ): Promise<void> {
   const db = await getDb();
@@ -483,16 +494,16 @@ export async function insertConciliacion(
 ): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    `INSERT INTO conciliaciones (cuenta_id, saldo_app, saldo_real, diferencia, estado)
+    `INSERT INTO conciliaciones (cuenta_origen_id, saldo_app, saldo_real, diferencia, estado)
      VALUES (?, ?, ?, ?, ?)`,
-    [conc.cuenta_id, conc.saldo_app, conc.saldo_real, conc.diferencia, conc.estado]
+    [conc.cuenta_origen_id, conc.saldo_app, conc.saldo_real, conc.diferencia, conc.estado]
   );
 }
 
 export async function getUltimaConciliacion(cuentaId: number): Promise<Conciliacion | null> {
   const db = await getDb();
   return await db.getFirstAsync<Conciliacion>(
-    'SELECT * FROM conciliaciones WHERE cuenta_id = ? ORDER BY fecha DESC LIMIT 1',
+    'SELECT * FROM conciliaciones WHERE cuenta_origen_id = ? ORDER BY fecha DESC LIMIT 1',
     [cuentaId]
   );
 }
@@ -535,7 +546,7 @@ export async function getResumenPeriodo(
 // ── Estadísticas mensuales por cuenta (todas a la vez) ───────────────────
 
 export interface EstadisticasCuenta {
-  cuenta_id:       number;
+  cuenta_origen_id: number;
   ingresos:        number;
   egresos:         number;
   num_movimientos: number;
@@ -549,7 +560,7 @@ export async function getEstadisticasPorCuenta(
   const db = await getDb();
   return await db.getAllAsync<EstadisticasCuenta>(
     `SELECT
-       cuenta_id,
+       cuenta_origen_id,
        COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0) AS ingresos,
        COALESCE(SUM(CASE WHEN tipo = 'egreso'  THEN monto ELSE 0 END), 0) AS egresos,
        COUNT(*) AS num_movimientos
@@ -557,7 +568,7 @@ export async function getEstadisticasPorCuenta(
      WHERE usuario_id = ?
        AND tipo IN ('ingreso','egreso')
        AND fecha BETWEEN ? AND ?
-     GROUP BY cuenta_id`,
+     GROUP BY cuenta_origen_id`,
     [usuarioId, desde, hasta]
   );
 }
@@ -638,7 +649,7 @@ export async function getMovimientosPeriodo(
             c.nombre AS cuenta_nombre,
             cat.nombre AS categoria_nombre
      FROM movimientos m
-     LEFT JOIN cuentas c ON c.id = m.cuenta_id
+     LEFT JOIN cuentas c ON c.id = m.cuenta_origen_id
      LEFT JOIN categorias cat ON cat.id = m.categoria_id
      WHERE m.usuario_id = ? AND m.tipo IN ('ingreso','egreso')
        AND m.fecha BETWEEN ? AND ?

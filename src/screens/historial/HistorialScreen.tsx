@@ -9,7 +9,7 @@ import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { useHistorial } from '../../hooks/useHistorial';
 import { buildCategoriPath, CategoriaSelector } from '../../components/forms/CategoriaSelector';
 import { CuentaSelector } from '../../components/forms/CuentaSelector';
-import { formatMonto } from '../../utils/formatters';
+import { formatMonto, parseFechaLocal } from '../../utils/formatters';
 import { Movimiento } from '../../types';
 import { Colors } from '../../constants/Colors';
 import { Fonts } from '../../constants/Fonts';
@@ -125,13 +125,26 @@ function MovimientoItem({
 
 // ── Modal de edición ──────────────────────────────────────────────────────
 
+const ORIGENES_EDIT = [
+  { key: 'manual'    as const, label: 'Manual',    color: Colors.gris      },
+  { key: 'yape'      as const, label: 'Yape',      color: '#7B3FE4'        },
+  { key: 'plin'      as const, label: 'Plin',      color: '#00AEEF'        },
+  { key: 'bcp'       as const, label: 'BCP',       color: Colors.bcp       },
+  { key: 'interbank' as const, label: 'Interbank', color: Colors.interbank },
+  { key: 'bbva'      as const, label: 'BBVA',      color: Colors.bbva      },
+  { key: 'foto'      as const, label: 'Foto',      color: Colors.celeste   },
+];
+
 interface EditForm {
-  tipo: 'ingreso' | 'egreso';
-  monto: string;
-  descripcion: string;
-  cuentaId: number | null;
-  categoriaId: number | null;
-  fecha: Date;
+  tipo:             'ingreso' | 'egreso' | 'transferencia';
+  monto:            string;
+  descripcion:      string;
+  cuentaId:         number | null;
+  cuentaDestinoId:  number | null;
+  categoriaId:      number | null;
+  fecha:            Date;
+  origen:           Movimiento['origen'];
+  numeroOperacion:  string;
 }
 
 function EditModal({
@@ -148,12 +161,15 @@ function EditModal({
   onClose: () => void;
 }) {
   const [form, setForm] = useState<EditForm>({
-    tipo:        mov.tipo as 'ingreso' | 'egreso',
-    monto:       String(mov.monto),
-    descripcion: mov.descripcion ?? '',
-    cuentaId:    mov.cuenta_id,
-    categoriaId: mov.categoria_id ?? null,
-    fecha:       new Date(mov.fecha.replace(' ', 'T')),
+    tipo:            mov.tipo as 'ingreso' | 'egreso' | 'transferencia',
+    monto:           String(mov.monto),
+    descripcion:     mov.descripcion ?? '',
+    cuentaId:        mov.cuenta_origen_id,
+    cuentaDestinoId: mov.cuenta_destino_id ?? null,
+    categoriaId:     mov.categoria_id ?? null,
+    fecha:           parseFechaLocal(mov.fecha),
+    origen:          mov.origen ?? 'manual',
+    numeroOperacion: mov.numero_operacion && mov.numero_operacion !== '0' ? mov.numero_operacion : '',
   });
   const [saving, setSaving] = useState(false);
   const [catReset, setCatReset] = useState(false);
@@ -165,7 +181,7 @@ function EditModal({
     [form.tipo, categorias]
   );
 
-  function setTipo(tipo: 'ingreso' | 'egreso') {
+  function setTipo(tipo: 'ingreso' | 'egreso' | 'transferencia') {
     setForm(f => ({
       ...f,
       tipo,
@@ -200,137 +216,137 @@ function EditModal({
         <View style={st.modalHandle} />
         <Text style={st.modalTitle}>Editar movimiento</Text>
 
-        {/* Tipo */}
-        <View style={st.tipoRow}>
-          {(['ingreso', 'egreso'] as const).map(t => (
-            <TouchableOpacity
-              key={t}
-              style={[st.tipoBtn, form.tipo === t && (t === 'ingreso' ? st.tipoBtnIng : st.tipoBtnEgr)]}
-              onPress={() => setTipo(t)}
-            >
-              <Ionicons
-                name={t === 'ingreso' ? 'arrow-up-circle' : 'arrow-down-circle'}
-                size={18}
-                color={form.tipo === t ? Colors.blanco : t === 'ingreso' ? Colors.verde : Colors.rojo}
-              />
-              <Text style={[st.tipoBtnText, form.tipo === t && { color: Colors.blanco }]}>
-                {t === 'ingreso' ? 'Ingreso' : 'Egreso'}
+        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          {/* Tipo */}
+          <Text style={st.fieldLabel}>Tipo</Text>
+          <View style={st.tipoRow}>
+            {([
+              { key: 'ingreso',       label: 'Ingreso',      icon: 'arrow-up-circle',   active: st.tipoBtnIng      },
+              { key: 'egreso',        label: 'Egreso',       icon: 'arrow-down-circle', active: st.tipoBtnEgr      },
+              { key: 'transferencia', label: 'Transferir',   icon: 'swap-horizontal',   active: st.tipoBtnTransfer },
+            ] as const).map(t => (
+              <TouchableOpacity
+                key={t.key}
+                style={[st.tipoBtn, form.tipo === t.key && t.active]}
+                onPress={() => setTipo(t.key)}
+              >
+                <Ionicons name={t.icon} size={16} color={form.tipo === t.key ? Colors.blanco : Colors.gris} />
+                <Text style={[st.tipoBtnText, form.tipo === t.key && { color: Colors.blanco }]}>{t.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Monto */}
+          <Text style={st.fieldLabel}>Monto</Text>
+          <TextInput
+            style={st.fieldInput}
+            value={form.monto}
+            onChangeText={v => setForm(f => ({ ...f, monto: v }))}
+            keyboardType="decimal-pad"
+            placeholder="0.00"
+            placeholderTextColor={Colors.gris}
+          />
+
+          {/* Fecha y hora */}
+          <Text style={st.fieldLabel}>Fecha y hora</Text>
+          <View style={st.fechaRow}>
+            <TouchableOpacity style={st.fechaBtn} onPress={() => setShowDatePicker(true)} activeOpacity={0.75}>
+              <Ionicons name="calendar-outline" size={16} color={Colors.celeste} />
+              <Text style={st.fechaBtnText}>
+                {form.fecha.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })}
               </Text>
             </TouchableOpacity>
-          ))}
-        </View>
+            <TouchableOpacity style={st.fechaBtn} onPress={() => setShowTimePicker(true)} activeOpacity={0.75}>
+              <Ionicons name="time-outline" size={16} color={Colors.celeste} />
+              <Text style={st.fechaBtnText}>
+                {String(form.fecha.getHours()).padStart(2, '0')}:{String(form.fecha.getMinutes()).padStart(2, '0')}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* Monto */}
-        <Text style={st.fieldLabel}>Monto</Text>
-        <TextInput
-          style={st.fieldInput}
-          value={form.monto}
-          onChangeText={v => setForm(f => ({ ...f, monto: v }))}
-          keyboardType="decimal-pad"
-          placeholder="0.00"
-          placeholderTextColor={Colors.gris}
-        />
+          {showDatePicker && (
+            <DateTimePicker value={form.fecha} mode="date"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'} maximumDate={new Date()}
+              onChange={(_, date) => {
+                setShowDatePicker(Platform.OS === 'ios');
+                if (date) setForm(f => { const n = new Date(date); n.setHours(f.fecha.getHours(), f.fecha.getMinutes(), 0); return { ...f, fecha: n }; });
+              }}
+            />
+          )}
+          {showTimePicker && (
+            <DateTimePicker value={form.fecha} mode="time"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'} is24Hour
+              onChange={(_, date) => {
+                setShowTimePicker(Platform.OS === 'ios');
+                if (date) setForm(f => { const n = new Date(f.fecha); n.setHours(date.getHours(), date.getMinutes(), 0); return { ...f, fecha: n }; });
+              }}
+            />
+          )}
 
-        {/* Descripcion */}
-        <Text style={st.fieldLabel}>Descripción</Text>
-        <TextInput
-          style={st.fieldInput}
-          value={form.descripcion}
-          onChangeText={v => setForm(f => ({ ...f, descripcion: v }))}
-          placeholder="Opcional..."
-          placeholderTextColor={Colors.gris}
-        />
-
-        {/* Fecha y hora */}
-        <View style={st.fechaRow}>
-          <TouchableOpacity
-            style={st.fechaBtn}
-            onPress={() => setShowDatePicker(true)}
-            activeOpacity={0.75}
-          >
-            <Ionicons name="calendar-outline" size={16} color={Colors.celeste} />
-            <Text style={st.fechaBtnText}>
-              {form.fecha.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={st.fechaBtn}
-            onPress={() => setShowTimePicker(true)}
-            activeOpacity={0.75}
-          >
-            <Ionicons name="time-outline" size={16} color={Colors.celeste} />
-            <Text style={st.fechaBtnText}>
-              {String(form.fecha.getHours()).padStart(2, '0')}:{String(form.fecha.getMinutes()).padStart(2, '0')}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {showDatePicker && (
-          <DateTimePicker
-            value={form.fecha}
-            mode="date"
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            maximumDate={new Date()}
-            onChange={(_, date) => {
-              setShowDatePicker(Platform.OS === 'ios');
-              if (date) {
-                setForm(f => {
-                  const nueva = new Date(date);
-                  nueva.setHours(f.fecha.getHours(), f.fecha.getMinutes(), 0);
-                  return { ...f, fecha: nueva };
-                });
-              }
-            }}
+          {/* Cuenta */}
+          <CuentaSelector
+            cuentas={cuentas}
+            value={form.cuentaId}
+            onChange={id => setForm(f => ({ ...f, cuentaId: id }))}
+            label={form.tipo === 'transferencia' ? 'Cuenta origen' : 'Cuenta'}
           />
-        )}
 
-        {showTimePicker && (
-          <DateTimePicker
-            value={form.fecha}
-            mode="time"
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            is24Hour
-            onChange={(_, date) => {
-              setShowTimePicker(Platform.OS === 'ios');
-              if (date) {
-                setForm(f => {
-                  const nueva = new Date(f.fecha);
-                  nueva.setHours(date.getHours(), date.getMinutes(), 0);
-                  return { ...f, fecha: nueva };
-                });
-              }
-            }}
+          {/* Cuenta destino — solo transferencia */}
+          {form.tipo === 'transferencia' && (
+            <CuentaSelector
+              cuentas={cuentas.filter(c => c.id !== form.cuentaId)}
+              value={form.cuentaDestinoId}
+              onChange={id => setForm(f => ({ ...f, cuentaDestinoId: id }))}
+              label="Cuenta destino"
+            />
+          )}
+
+          {/* Categoría */}
+          <CategoriaSelector
+            categorias={categoriasFiltradas}
+            tipo={form.tipo === 'transferencia' ? 'egreso' : form.tipo}
+            value={form.categoriaId}
+            onChange={id => { setCatReset(false); setForm(f => ({ ...f, categoriaId: id })); }}
+            advertencia={catReset}
           />
-        )}
 
-        {/* Cuenta */}
-        <CuentaSelector
-          cuentas={cuentas}
-          value={form.cuentaId}
-          onChange={id => setForm(f => ({ ...f, cuentaId: id }))}
-        />
+          {/* Nro. Operación */}
+          <Text style={st.fieldLabel}>Nro. Operación</Text>
+          <TextInput
+            style={st.fieldInput}
+            value={form.numeroOperacion}
+            onChangeText={v => setForm(f => ({ ...f, numeroOperacion: v }))}
+            placeholder="Número de operación o referencia"
+            placeholderTextColor={Colors.gris}
+          />
 
-        {/* Categoría */}
-        <CategoriaSelector
-          categorias={categoriasFiltradas}
-          tipo={form.tipo}
-          value={form.categoriaId}
-          onChange={id => { setCatReset(false); setForm(f => ({ ...f, categoriaId: id })); }}
-          advertencia={catReset}
-        />
+          {/* Notas */}
+          <Text style={st.fieldLabel}>Notas</Text>
+          <TextInput
+            style={[st.fieldInput, { minHeight: 72, textAlignVertical: 'top' }]}
+            value={form.descripcion}
+            onChangeText={v => setForm(f => ({ ...f, descripcion: v }))}
+            placeholder="Opcional..."
+            placeholderTextColor={Colors.gris}
+            multiline
+            numberOfLines={3}
+          />
 
-        {/* Guardar */}
-        <TouchableOpacity
-          style={[st.saveBtn, saving && { opacity: 0.6 }]}
-          onPress={handleSave}
-          disabled={saving}
-          activeOpacity={0.85}
-        >
-          {saving
-            ? <ActivityIndicator color={Colors.blanco} />
-            : <Text style={st.saveBtnText}>GUARDAR CAMBIOS</Text>
-          }
-        </TouchableOpacity>
+          {/* Guardar */}
+          <TouchableOpacity
+            style={[st.saveBtn, saving && { opacity: 0.6 }]}
+            onPress={handleSave}
+            disabled={saving}
+            activeOpacity={0.85}
+          >
+            {saving
+              ? <ActivityIndicator color={Colors.blanco} />
+              : <Text style={st.saveBtnText}>GUARDAR CAMBIOS</Text>
+            }
+          </TouchableOpacity>
+
+          <View style={{ height: 24 }} />
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -356,12 +372,15 @@ export function HistorialScreen() {
     const f = form.fecha;
     const fecha = `${f.getFullYear()}-${pad(f.getMonth() + 1)}-${pad(f.getDate())} ${pad(f.getHours())}:${pad(f.getMinutes())}:00`;
     await actualizarMovimiento(id, {
-      tipo:         form.tipo,
+      tipo:              form.tipo,
       monto,
-      descripcion:  form.descripcion || null,
-      cuenta_id:    form.cuentaId!,
-      categoria_id: form.categoriaId,
+      descripcion:       form.descripcion || null,
+      cuenta_origen_id:  form.cuentaId!,
+      cuenta_destino_id: form.cuentaDestinoId ?? null,
+      categoria_id:      form.categoriaId,
       fecha,
+      origen:            form.origen,
+      numero_operacion:  form.numeroOperacion || '0',
     });
   }
 
@@ -534,7 +553,7 @@ const st = StyleSheet.create({
   chipTextActive:{ color: Colors.blanco },
 
   // Lista
-  listContent:    { paddingHorizontal: 16, paddingTop: 12 },
+  listContent:    { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 80 },
 
   // Fecha header
   fechaHeader:     { paddingVertical: 8 },
@@ -596,9 +615,15 @@ const st = StyleSheet.create({
     paddingVertical: 11, borderRadius: 12, borderWidth: 1.5,
     borderColor: Colors.borde, backgroundColor: Colors.blanco,
   },
-  tipoBtnIng:  { backgroundColor: Colors.verde, borderColor: Colors.verde },
-  tipoBtnEgr:  { backgroundColor: Colors.rojo,  borderColor: Colors.rojo  },
+  tipoBtnIng:     { backgroundColor: Colors.verde,  borderColor: Colors.verde  },
+  tipoBtnEgr:     { backgroundColor: Colors.rojo,   borderColor: Colors.rojo   },
+  tipoBtnTransfer:{ backgroundColor: Colors.morado, borderColor: Colors.morado },
   tipoBtnText: { fontFamily: Fonts.semiBold, fontSize: 14, color: Colors.texto },
+
+  // Origen chips
+  origenRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  origenChip:     { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: Colors.borde, backgroundColor: Colors.blanco },
+  origenChipText: { fontFamily: Fonts.medium, fontSize: 13, color: Colors.texto },
   fieldLabel: { fontFamily: Fonts.medium, fontSize: 13, color: Colors.texto },
   fechaRow:   { flexDirection: 'row', gap: 10 },
   fechaBtn: {

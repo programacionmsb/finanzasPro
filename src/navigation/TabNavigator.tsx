@@ -70,7 +70,7 @@ export function TabNavigator() {
       <Tab.Navigator
         screenOptions={{
           headerShown: false,
-          tabBarStyle: [styles.tabBar, { paddingBottom: 8 + bottom }],
+          tabBarStyle: [styles.tabBar, { paddingBottom: 6 + bottom, height: 62 + bottom }],
           tabBarActiveTintColor: Colors.azul,
           tabBarInactiveTintColor: Colors.gris,
           tabBarLabelStyle: styles.tabLabel,
@@ -159,6 +159,7 @@ const styles = StyleSheet.create({
   tabLabel: {
     fontFamily: Fonts.medium,
     fontSize: 11,
+    marginBottom: 2,
   },
   addButtonWrapper: {
     top: -20,

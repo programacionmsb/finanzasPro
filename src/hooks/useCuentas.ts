@@ -40,7 +40,7 @@ export function useCuentas() {
 
         if (!mounted) return;
 
-        const statsMap = new Map(stats.map(s => [s.cuenta_id, s]));
+        const statsMap = new Map(stats.map(s => [s.cuenta_origen_id, s]));
         const concilMap = new Map(rawCuentas.map((c, i) => [c.id, concils[i]]));
 
         setEstadisticas(statsMap);
